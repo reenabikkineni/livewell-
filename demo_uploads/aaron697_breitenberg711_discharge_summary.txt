@@ -1,0 +1,26 @@
+CALIFORNIA COMMUNITY HOSPITAL
+Clinical Documentation Department
+1250 Westlake Medical Plaza, Los Angeles, CA 90057
+
+DISCHARGE SUMMARY
+Document Date: 2026-04-17
+Encounter ID: DS-2026-0417-4408
+Attending Physician: Elena Morris, MD
+
+Patient Name: Aaron697 Breitenberg711
+Patient ID: 4f6f3c94-9832-e91e-a5bd-bc482f3b1019
+Date of Birth: 2001-02-10
+
+Reason For Visit
+Outpatient follow-up after routine laboratory review and blood pressure check.
+
+Pertinent Results
+Glucose: 96 mg/dL
+Creatinine: 1.02 mg/dL
+BMI: 21.9 kg/m2
+Systolic Blood Pressure: 126 mmHg
+
+Assessment And Plan
+No urgent metabolic abnormality identified in this encounter. Mild systolic blood pressure elevation noted and discussed with patient. Continue routine primary care follow-up.
+
+Clinical Note: Patient advised to monitor blood pressure trends and return for routine outpatient review if home readings remain elevated.

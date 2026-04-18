@@ -1,0 +1,5 @@
+PATIENT,ACCESSION_NO,ORDER_DATE,COLLECTION_DATE,RESULT_DATE,PANEL,TEST_NAME,VALUE,UNIT,REFERENCE_RANGE,ABNORMAL_FLAG,RESULT_STATUS,ORDERING_PROVIDER,PERFORMING_LAB
+4f6f3c94-9832-e91e-a5bd-bc482f3b1019,CMP-26-0417-55021,2026-04-16,2026-04-16,2026-04-17,Comprehensive Metabolic Panel,Glucose,96,mg/dL,70-99,N,Final,Elena Morris MD,California Community Hospital Core Lab
+4f6f3c94-9832-e91e-a5bd-bc482f3b1019,CMP-26-0417-55021,2026-04-16,2026-04-16,2026-04-17,Comprehensive Metabolic Panel,Creatinine,1.02,mg/dL,0.74-1.35,N,Final,Elena Morris MD,California Community Hospital Core Lab
+4f6f3c94-9832-e91e-a5bd-bc482f3b1019,VS-26-0417-90114,2026-04-17,2026-04-17,2026-04-17,Clinic Vitals,Systolic Blood Pressure,126,mmHg,90-120,H,Final,Nurse Intake,California Community Hospital Internal Medicine
+4f6f3c94-9832-e91e-a5bd-bc482f3b1019,VS-26-0417-90114,2026-04-17,2026-04-17,2026-04-17,Clinic Vitals,BMI,21.9,kg/m2,18.5-24.9,N,Final,Nurse Intake,California Community Hospital Internal Medicine

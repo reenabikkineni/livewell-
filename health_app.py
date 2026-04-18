@@ -700,6 +700,23 @@ def get_disease_probabilities(models: dict, patient_features: pd.DataFrame) -> d
     return probabilities
 
 
+def apply_uploaded_values_to_features(patient_features: pd.DataFrame, uploaded_report: dict | None) -> pd.DataFrame:
+    adjusted_features = patient_features.copy()
+    uploaded_values = (uploaded_report or {}).get("values", {})
+    feature_map = {
+        "Blood sugar": "glucose",
+        "BMI": "bmi",
+        "Creatinine": "creatinine",
+        "Systolic blood pressure": "systolic_bp",
+    }
+
+    for label, feature_name in feature_map.items():
+        if label in uploaded_values:
+            adjusted_features[feature_name] = float(uploaded_values[label])
+
+    return adjusted_features
+
+
 def validate_uploaded_file(uploaded_file, patient_id: str):
     raw_bytes = uploaded_file.getvalue()
     file_name = uploaded_file.name
@@ -769,6 +786,36 @@ def extract_measurements_from_dataframe(uploaded_frame: pd.DataFrame) -> dict:
             series = pd.to_numeric(uploaded_frame[matched_column], errors="coerce").dropna()
             if not series.empty:
                 extracted[label] = float(series.iloc[0])
+
+    if extracted:
+        return extracted
+
+    name_column = next(
+        (
+            column_map[key]
+            for key in column_map
+            if key in {"test_name", "test", "analyte", "measurement", "observation", "result_name"}
+        ),
+        None,
+    )
+    value_column = next(
+        (
+            column_map[key]
+            for key in column_map
+            if key in {"value", "result_value", "result", "numeric_result", "observation_value"}
+        ),
+        None,
+    )
+
+    if name_column is not None and value_column is not None:
+        name_series = uploaded_frame[name_column].astype(str).str.strip().str.lower()
+        value_series = pd.to_numeric(uploaded_frame[value_column], errors="coerce")
+
+        for label, patterns in measurement_patterns.items():
+            mask = name_series.apply(lambda text: any(pattern in text for pattern in patterns))
+            matches = value_series[mask].dropna()
+            if not matches.empty:
+                extracted[label] = float(matches.iloc[0])
 
     return extracted
 
@@ -1342,12 +1389,16 @@ def build_selected_patient_context(
     encounter_lookup: dict,
     empty_conditions: pd.DataFrame,
     empty_encounters: pd.DataFrame,
+    uploaded_report: dict | None = None,
 ):
     patient_id = patient_row["Id"]
     patient_features = features_df.loc[features_df["Id"] == patient_id].drop(columns=["Id"])
+    patient_features = apply_uploaded_values_to_features(patient_features, uploaded_report)
     disease_probabilities = get_disease_probabilities(models, patient_features)
     diabetes_probability = disease_probabilities.get("diabetes", 0.0)
-    latest_values = latest_values_lookup.get(str(patient_id), {})
+    latest_values = latest_values_lookup.get(str(patient_id), {}).copy()
+    if uploaded_report and uploaded_report.get("values"):
+        latest_values.update(uploaded_report["values"])
     patient_conditions = condition_lookup.get(str(patient_id), empty_conditions.copy())
     patient_encounters = encounter_lookup.get(str(patient_id), empty_encounters.copy())
     systolic_value = latest_values.get("Systolic blood pressure")
@@ -1364,6 +1415,7 @@ def build_selected_patient_context(
         "overall_score": max(0, min(100, int(round((1 - diabetes_probability) * 100)))),
         "bp_value_text": f"{systolic_value:.0f} mmHg" if systolic_value is not None else "Not available",
         "first_name": patient_row["FIRST"] if pd.notna(patient_row["FIRST"]) else "Patient",
+        "uploaded_report_active": bool(uploaded_report and uploaded_report.get("values")),
     }
 
 
@@ -1516,17 +1568,19 @@ st.sidebar.markdown(
 )
 
 uploaded_file = st.sidebar.file_uploader("Upload lab report or patient file", type=None)
+context_cache_key = f"patient_context_{patient_id}"
 if uploaded_file is not None:
     upload_status, upload_message, parsed_upload = validate_uploaded_file(uploaded_file, patient_id)
     getattr(st.sidebar, upload_status)(upload_message)
     if parsed_upload:
         st.session_state[f"uploaded_report_{patient_id}"] = parsed_upload
+        st.session_state.pop(context_cache_key, None)
 
 page = st.sidebar.radio("Navigation", ["Home", "My History", "Health Check", "My Reports"])
 
 empty_conditions = conditions_df.iloc[0:0].copy()
 empty_encounters = encounters_df.iloc[0:0].copy()
-context_cache_key = f"patient_context_{patient_id}"
+uploaded_report = st.session_state.get(f"uploaded_report_{patient_id}")
 
 if context_cache_key not in st.session_state:
     st.session_state[context_cache_key] = build_selected_patient_context(
@@ -1538,6 +1592,7 @@ if context_cache_key not in st.session_state:
         encounter_lookup,
         empty_conditions,
         empty_encounters,
+        uploaded_report,
     )
 
 patient_context = st.session_state[context_cache_key]
@@ -1552,7 +1607,7 @@ patient_encounters = patient_context["patient_encounters"]
 overall_score = patient_context["overall_score"]
 bp_value_text = patient_context["bp_value_text"]
 first_name = patient_context["first_name"]
-uploaded_report = st.session_state.get(f"uploaded_report_{patient_id}")
+uploaded_report_active = patient_context["uploaded_report_active"]
 
 
 def render_home():
@@ -1571,6 +1626,16 @@ def render_home():
         """,
         unsafe_allow_html=True,
     )
+
+    if uploaded_report_active and uploaded_report:
+        st.markdown(
+            f"""
+            <div class="summary-box summary-success">
+                Uploaded values from {uploaded_report.get("file_name", "your file")} are now being used in this dashboard view.
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
     intro_col, guide_col = st.columns([1.15, 0.85])
     with intro_col:
