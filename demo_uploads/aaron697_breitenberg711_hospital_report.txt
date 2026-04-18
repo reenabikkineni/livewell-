@@ -1,0 +1,14 @@
+California Community Hospital
+Outpatient Laboratory Result Summary
+Report Date: 2026-04-17
+
+Patient Name: Aaron697 Breitenberg711
+Patient ID: 4f6f3c94-9832-e91e-a5bd-bc482f3b1019
+Date of Birth: 2001-02-10
+
+Glucose: 96 mg/dL
+Creatinine: 1.02 mg/dL
+BMI: 21.9 kg/m2
+Systolic Blood Pressure: 126 mmHg
+
+Clinical Note: Mild elevation in systolic blood pressure. Recommend routine follow-up and trend review if repeat readings stay above the ideal range.

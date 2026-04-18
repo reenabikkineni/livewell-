@@ -1,0 +1,12 @@
+[
+  {
+    "patient_id": "4f6f3c94-9832-e91e-a5bd-bc482f3b1019",
+    "report_type": "lab_summary",
+    "date": "2026-04-17",
+    "glucose_mg_dl": 96,
+    "creatinine_mg_dl": 1.02,
+    "systolic_bp_mmhg": 126,
+    "bmi": 21.9,
+    "comment": "Demo upload file for Aaron697 Breitenberg711"
+  }
+]

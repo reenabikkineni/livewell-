@@ -1,0 +1,5 @@
+PATIENT,REPORT_TYPE,TEST_NAME,VALUE,UNIT,REFERENCE_RANGE,NOTE
+4f6f3c94-9832-e91e-a5bd-bc482f3b1019,lab,Glucose,96,mg/dL,70-99,Within expected range
+4f6f3c94-9832-e91e-a5bd-bc482f3b1019,lab,Creatinine,1.02,mg/dL,0.74-1.35,Normal kidney marker
+4f6f3c94-9832-e91e-a5bd-bc482f3b1019,vitals,Systolic blood pressure,126,mmHg,90-120,Slightly elevated
+4f6f3c94-9832-e91e-a5bd-bc482f3b1019,vitals,BMI,21.9,kg/m2,18.5-24.9,Within recommended range
