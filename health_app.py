@@ -148,6 +148,28 @@ def apply_theme(theme_name: str) -> None:
             min-height: 128px;
             box-shadow: 0 12px 24px rgba(15, 23, 42, 0.05);
         }}
+        .metric-status {{
+            display: flex;
+            align-items: center;
+            gap: 0.55rem;
+            margin-bottom: 0.45rem;
+        }}
+        .status-dot {{
+            width: 0.95rem;
+            height: 0.95rem;
+            border-radius: 999px;
+            display: inline-block;
+            box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.04);
+        }}
+        .status-dot.red {{
+            background: #ef4444;
+        }}
+        .status-dot.amber {{
+            background: #f59e0b;
+        }}
+        .status-dot.green {{
+            background: #22c55e;
+        }}
         .metric-label {{
             color: {muted};
             font-size: 0.92rem;
@@ -169,6 +191,18 @@ def apply_theme(theme_name: str) -> None:
             color: {accent};
             font-size: 0.88rem;
             font-weight: 600;
+        }}
+        .metric-pill.red {{
+            background: {error_bg};
+            color: {error_text};
+        }}
+        .metric-pill.amber {{
+            background: {warning_bg};
+            color: {warning_text};
+        }}
+        .metric-pill.green {{
+            background: {success_bg};
+            color: {success_text};
         }}
         .small-note {{
             color: {muted};
@@ -845,6 +879,35 @@ def bp_status(latest_values: dict) -> str:
     return "Normal"
 
 
+def tone_from_risk(probability: float) -> str:
+    if probability >= 0.6:
+        return "red"
+    if probability >= 0.35:
+        return "amber"
+    return "green"
+
+
+def tone_from_score(score: int) -> str:
+    if score < 40:
+        return "red"
+    if score < 70:
+        return "amber"
+    return "green"
+
+
+def tone_from_bp(latest_values: dict) -> str:
+    status = bp_status(latest_values)
+    if status == "High":
+        return "red"
+    if status in {"Elevated", "No recent value"}:
+        return "amber"
+    return "green"
+
+
+def icon_for_tone(tone: str) -> str:
+    return {"red": "&uarr;", "amber": "!", "green": "&check;"}.get(tone, "&bull;")
+
+
 def get_patient_history(patient_id: str, conditions_df: pd.DataFrame, encounters_df: pd.DataFrame):
     patient_conditions = conditions_df[conditions_df["PATIENT"] == patient_id].copy()
     patient_encounters = encounters_df[encounters_df["PATIENT"] == patient_id].copy()
@@ -1493,6 +1556,12 @@ uploaded_report = st.session_state.get(f"uploaded_report_{patient_id}")
 
 
 def render_home():
+    overall_tone = tone_from_score(overall_score)
+    blood_pressure_status = bp_status(latest_values)
+    blood_pressure_tone = tone_from_bp(latest_values)
+    overall_alert = overall_alert_level(disease_probabilities)
+    overall_alert_tone = tone_from_risk(max(disease_probabilities.values()) if disease_probabilities else 0.0)
+
     st.markdown(
         f"""
         <div class="hero-card">
@@ -1536,9 +1605,10 @@ def render_home():
         st.markdown(
             f"""
             <div class="metric-card">
+                <div class="metric-status"><span class="status-dot {overall_tone}"></span><span class="small-note">Score status</span></div>
                 <div class="metric-label">Overall Health Score</div>
                 <div class="metric-value">{overall_score} / 100</div>
-                <div class="metric-pill">Based on current record</div>
+                <div class="metric-pill {overall_tone}">{icon_for_tone(overall_tone)} Based on current record</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1547,9 +1617,10 @@ def render_home():
         st.markdown(
             f"""
             <div class="metric-card">
+                <div class="metric-status"><span class="status-dot {blood_pressure_tone}"></span><span class="small-note">Blood pressure status</span></div>
                 <div class="metric-label">Latest Blood Pressure</div>
                 <div class="metric-value">{bp_value_text}</div>
-                <div class="metric-pill">{bp_status(latest_values)}</div>
+                <div class="metric-pill {blood_pressure_tone}">{icon_for_tone(blood_pressure_tone)} {blood_pressure_status}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1558,9 +1629,10 @@ def render_home():
         st.markdown(
             f"""
             <div class="metric-card">
+                <div class="metric-status"><span class="status-dot {overall_alert_tone}"></span><span class="small-note">Overall alert status</span></div>
                 <div class="metric-label">Risk Alert Level</div>
-                <div class="metric-value">{overall_alert_level(disease_probabilities)}</div>
-                <div class="metric-pill">Across health checks</div>
+                <div class="metric-value">{overall_alert}</div>
+                <div class="metric-pill {overall_alert_tone}">{icon_for_tone(overall_alert_tone)} Across health checks</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1576,13 +1648,15 @@ def render_home():
     ]
     for column, disease_name in zip(disease_columns, ordered_diseases):
         disease_probability = disease_probabilities.get(disease_name, 0.0)
+        disease_tone = tone_from_risk(disease_probability)
         with column:
             st.markdown(
                 f"""
                 <div class="metric-card">
+                    <div class="metric-status"><span class="status-dot {disease_tone}"></span><span class="small-note">Risk signal</span></div>
                     <div class="metric-label">{pretty_disease_name(disease_name)}</div>
                     <div class="metric-value">{risk_level(disease_probability)}</div>
-                    <div class="metric-pill">{disease_probability * 100:.1f}% chance</div>
+                    <div class="metric-pill {disease_tone}">{icon_for_tone(disease_tone)} {disease_probability * 100:.1f}% chance</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
