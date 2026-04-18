@@ -17,6 +17,7 @@ TARGET_PATIENT_COUNT = 10000
 DEFAULT_DEMO_PATIENT_ID = "4f6f3c94-9832-e91e-a5bd-bc482f3b1019"
 APP_DIR = Path(__file__).resolve().parent
 DATA_DIR_CANDIDATES = [
+    APP_DIR / "app_data",
     APP_DIR,
     APP_DIR / "synthea-4.0.0" / "synthea-4.0.0" / "output" / "csv",
 ]
@@ -337,7 +338,8 @@ def find_data_file(filename: str) -> Path:
         path = folder / filename
         if path.exists():
             return path
-    raise FileNotFoundError(f"Could not find {filename}")
+    searched_locations = ", ".join(str(folder / filename) for folder in DATA_DIR_CANDIDATES)
+    raise FileNotFoundError(f"Could not find {filename}. Looked in: {searched_locations}")
 
 
 @st.cache_data
