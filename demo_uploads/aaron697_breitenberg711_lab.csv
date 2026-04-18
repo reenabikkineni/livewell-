@@ -1,5 +1,0 @@
-PATIENT,ORDER_ID,COLLECTION_DATE,REPORT_DATE,REPORT_TYPE,TEST_NAME,VALUE,UNIT,REFERENCE_RANGE,FLAG,STATUS,ORDERING_PROVIDER,LAB_NAME
-4f6f3c94-9832-e91e-a5bd-bc482f3b1019,LP-2026-0417-1182,2026-04-16,2026-04-17,Chemistry Panel,Glucose,96,mg/dL,70-99,N,Final,Dr. Elena Morris,California Community Hospital Laboratory
-4f6f3c94-9832-e91e-a5bd-bc482f3b1019,LP-2026-0417-1182,2026-04-16,2026-04-17,Renal Function Panel,Creatinine,1.02,mg/dL,0.74-1.35,N,Final,Dr. Elena Morris,California Community Hospital Laboratory
-4f6f3c94-9832-e91e-a5bd-bc482f3b1019,VS-2026-0417-2044,2026-04-17,2026-04-17,Vital Signs,Systolic Blood Pressure,126,mmHg,90-120,H,Final,Nurse Intake,California Community Hospital Outpatient Clinic
-4f6f3c94-9832-e91e-a5bd-bc482f3b1019,VS-2026-0417-2044,2026-04-17,2026-04-17,Vital Signs,BMI,21.9,kg/m2,18.5-24.9,N,Final,Nurse Intake,California Community Hospital Outpatient Clinic
