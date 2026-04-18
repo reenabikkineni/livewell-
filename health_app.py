@@ -1569,18 +1569,22 @@ st.sidebar.markdown(
 
 uploaded_file = st.sidebar.file_uploader("Upload lab report or patient file", type=None)
 context_cache_key = f"patient_context_{patient_id}"
+uploaded_report_key = f"uploaded_report_{patient_id}"
 if uploaded_file is not None:
     upload_status, upload_message, parsed_upload = validate_uploaded_file(uploaded_file, patient_id)
     getattr(st.sidebar, upload_status)(upload_message)
     if parsed_upload:
-        st.session_state[f"uploaded_report_{patient_id}"] = parsed_upload
+        st.session_state[uploaded_report_key] = parsed_upload
         st.session_state.pop(context_cache_key, None)
+elif uploaded_report_key in st.session_state:
+    st.session_state.pop(uploaded_report_key, None)
+    st.session_state.pop(context_cache_key, None)
 
 page = st.sidebar.radio("Navigation", ["Home", "My History", "Health Check", "My Reports"])
 
 empty_conditions = conditions_df.iloc[0:0].copy()
 empty_encounters = encounters_df.iloc[0:0].copy()
-uploaded_report = st.session_state.get(f"uploaded_report_{patient_id}")
+uploaded_report = st.session_state.get(uploaded_report_key)
 
 if context_cache_key not in st.session_state:
     st.session_state[context_cache_key] = build_selected_patient_context(
