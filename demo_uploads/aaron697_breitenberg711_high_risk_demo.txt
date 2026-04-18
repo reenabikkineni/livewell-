@@ -1,0 +1,23 @@
+CALIFORNIA COMMUNITY HOSPITAL
+Clinical Documentation Department
+1250 Westlake Medical Plaza, Los Angeles, CA 90057
+
+URGENT OUTPATIENT RESULT SUMMARY
+Document Date: 2026-04-17
+Encounter ID: DEMO-2026-0417-9901
+Attending Physician: Elena Morris, MD
+
+Patient Name: Aaron697 Breitenberg711
+Patient ID: 4f6f3c94-9832-e91e-a5bd-bc482f3b1019
+Date of Birth: 2001-02-10
+
+Pertinent Results
+Glucose: 186 mg/dL
+Creatinine: 1.84 mg/dL
+BMI: 31.2 kg/m2
+Systolic Blood Pressure: 168 mmHg
+
+Assessment And Plan
+Multiple abnormal values are present in this summary. Close follow-up and repeat testing are recommended.
+
+Clinical Note: Use this demo file to show how uploaded values can visibly change the dashboard in the live app.

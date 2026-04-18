@@ -700,9 +700,17 @@ def get_disease_probabilities(models: dict, patient_features: pd.DataFrame) -> d
     return probabilities
 
 
-def apply_uploaded_values_to_features(patient_features: pd.DataFrame, uploaded_report: dict | None) -> pd.DataFrame:
+def combine_uploaded_report_values(uploaded_reports: list[dict] | None) -> dict:
+    combined_values: dict[str, float] = {}
+    for report in uploaded_reports or []:
+        if report.get("values"):
+            combined_values.update(report["values"])
+    return combined_values
+
+
+def apply_uploaded_values_to_features(patient_features: pd.DataFrame, uploaded_reports: list[dict] | None) -> pd.DataFrame:
     adjusted_features = patient_features.copy()
-    uploaded_values = (uploaded_report or {}).get("values", {})
+    uploaded_values = combine_uploaded_report_values(uploaded_reports)
     feature_map = {
         "Blood sugar": "glucose",
         "BMI": "bmi",
@@ -877,6 +885,27 @@ def build_uploaded_report_summary(uploaded_report: dict | None) -> str:
         lines.append("Clinical note")
         for note in notes:
             lines.append(f"- {note}")
+
+    return "\n".join(lines)
+
+
+def build_uploaded_reports_summary(uploaded_reports: list[dict] | None) -> str:
+    if not uploaded_reports:
+        return "No uploaded hospital-style reports have been saved in this session yet."
+
+    lines = [f"Uploaded files in this session: {len(uploaded_reports)}"]
+    combined_values = combine_uploaded_report_values(uploaded_reports)
+
+    if combined_values:
+        lines.append("")
+        lines.append("Active values currently applied to the dashboard")
+        for label, value in combined_values.items():
+            lines.append(f"- {label}: {value}")
+
+    for index, report in enumerate(uploaded_reports, start=1):
+        lines.append("")
+        lines.append(f"File {index}")
+        lines.append(build_uploaded_report_summary(report))
 
     return "\n".join(lines)
 
@@ -1389,16 +1418,15 @@ def build_selected_patient_context(
     encounter_lookup: dict,
     empty_conditions: pd.DataFrame,
     empty_encounters: pd.DataFrame,
-    uploaded_report: dict | None = None,
+    uploaded_reports: list[dict] | None = None,
 ):
     patient_id = patient_row["Id"]
     patient_features = features_df.loc[features_df["Id"] == patient_id].drop(columns=["Id"])
-    patient_features = apply_uploaded_values_to_features(patient_features, uploaded_report)
+    patient_features = apply_uploaded_values_to_features(patient_features, uploaded_reports)
     disease_probabilities = get_disease_probabilities(models, patient_features)
     diabetes_probability = disease_probabilities.get("diabetes", 0.0)
     latest_values = latest_values_lookup.get(str(patient_id), {}).copy()
-    if uploaded_report and uploaded_report.get("values"):
-        latest_values.update(uploaded_report["values"])
+    latest_values.update(combine_uploaded_report_values(uploaded_reports))
     patient_conditions = condition_lookup.get(str(patient_id), empty_conditions.copy())
     patient_encounters = encounter_lookup.get(str(patient_id), empty_encounters.copy())
     systolic_value = latest_values.get("Systolic blood pressure")
@@ -1415,7 +1443,7 @@ def build_selected_patient_context(
         "overall_score": max(0, min(100, int(round((1 - diabetes_probability) * 100)))),
         "bp_value_text": f"{systolic_value:.0f} mmHg" if systolic_value is not None else "Not available",
         "first_name": patient_row["FIRST"] if pd.notna(patient_row["FIRST"]) else "Patient",
-        "uploaded_report_active": bool(uploaded_report and uploaded_report.get("values")),
+        "uploaded_report_active": bool(combine_uploaded_report_values(uploaded_reports)),
     }
 
 
@@ -1567,24 +1595,29 @@ st.sidebar.markdown(
     unsafe_allow_html=True,
 )
 
-uploaded_file = st.sidebar.file_uploader("Upload lab report or patient file", type=None)
+uploaded_files = st.sidebar.file_uploader("Upload lab report or patient file", type=None, accept_multiple_files=True)
 context_cache_key = f"patient_context_{patient_id}"
-uploaded_report_key = f"uploaded_report_{patient_id}"
-if uploaded_file is not None:
-    upload_status, upload_message, parsed_upload = validate_uploaded_file(uploaded_file, patient_id)
-    getattr(st.sidebar, upload_status)(upload_message)
-    if parsed_upload:
-        st.session_state[uploaded_report_key] = parsed_upload
-        st.session_state.pop(context_cache_key, None)
-elif uploaded_report_key in st.session_state:
-    st.session_state.pop(uploaded_report_key, None)
+uploaded_reports_key = f"uploaded_reports_{patient_id}"
+
+if uploaded_files:
+    parsed_reports: list[dict] = []
+    for uploaded_file in uploaded_files:
+        upload_status, upload_message, parsed_upload = validate_uploaded_file(uploaded_file, patient_id)
+        getattr(st.sidebar, upload_status)(upload_message)
+        if parsed_upload:
+            parsed_reports.append(parsed_upload)
+
+    st.session_state[uploaded_reports_key] = parsed_reports
+    st.session_state.pop(context_cache_key, None)
+elif uploaded_reports_key in st.session_state:
+    st.session_state.pop(uploaded_reports_key, None)
     st.session_state.pop(context_cache_key, None)
 
 page = st.sidebar.radio("Navigation", ["Home", "My History", "Health Check", "My Reports"])
 
 empty_conditions = conditions_df.iloc[0:0].copy()
 empty_encounters = encounters_df.iloc[0:0].copy()
-uploaded_report = st.session_state.get(uploaded_report_key)
+uploaded_reports = st.session_state.get(uploaded_reports_key, [])
 
 if context_cache_key not in st.session_state:
     st.session_state[context_cache_key] = build_selected_patient_context(
@@ -1596,7 +1629,7 @@ if context_cache_key not in st.session_state:
         encounter_lookup,
         empty_conditions,
         empty_encounters,
-        uploaded_report,
+        uploaded_reports,
     )
 
 patient_context = st.session_state[context_cache_key]
@@ -1631,11 +1664,11 @@ def render_home():
         unsafe_allow_html=True,
     )
 
-    if uploaded_report_active and uploaded_report:
+    if uploaded_report_active and uploaded_reports:
         st.markdown(
             f"""
             <div class="summary-box summary-success">
-                Uploaded values from {uploaded_report.get("file_name", "your file")} are now being used in this dashboard view.
+                Uploaded values from {len(uploaded_reports)} file(s) are now being used in this dashboard view.
             </div>
             """,
             unsafe_allow_html=True,
@@ -1913,9 +1946,9 @@ def render_health_check():
     else:
         st.info("Try a question like: What does creatinine mean? What should I ask my doctor? I have headache and dizziness.")
 
-    if uploaded_report:
+    if uploaded_reports:
         st.markdown("**Uploaded Report Summary**")
-        st.markdown(report_preview_html(build_uploaded_report_summary(uploaded_report)), unsafe_allow_html=True)
+        st.markdown(report_preview_html(build_uploaded_reports_summary(uploaded_reports)), unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
 
@@ -1944,9 +1977,9 @@ def render_reports():
     st.write("**Preview**")
     st.markdown(report_preview_html(report_text), unsafe_allow_html=True)
 
-    if uploaded_report:
-        st.write("**Uploaded Hospital-Style File**")
-        st.markdown(report_preview_html(build_uploaded_report_summary(uploaded_report)), unsafe_allow_html=True)
+    if uploaded_reports:
+        st.write("**Uploaded Hospital-Style Files**")
+        st.markdown(report_preview_html(build_uploaded_reports_summary(uploaded_reports)), unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
 
