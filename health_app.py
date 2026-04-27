@@ -1945,14 +1945,33 @@ def render_health_check():
         st.write(f"- {reason}")
 
     st.write("**Simple summary:**")
-    if latest_values.get("Blood sugar", 0) >= 126 or latest_values.get("Creatinine", 0) > 1.3:
+    bp_value = latest_values.get("Systolic blood pressure", 0)
+    bmi_value = latest_values.get("BMI", 0)
+    if (
+        latest_values.get("Blood sugar", 0) >= 126
+        or latest_values.get("Creatinine", 0) > 1.3
+        or bp_value >= 140
+        or bmi_value >= 30
+        or highest_probability >= 0.6
+    ):
         st.markdown(
-            '<div class="summary-box summary-warning">Some recent values are outside the usual range. This does not confirm a disease, but it does mean a follow-up may be helpful.</div>',
+            '<div class="summary-box summary-warning">This record shows stronger warning signals in the latest values. It does not confirm a disease, but follow-up would be reasonable.</div>',
+            unsafe_allow_html=True,
+        )
+    elif (
+        latest_values.get("Blood sugar", 0) >= 100
+        or latest_values.get("Creatinine", 0) > 1.1
+        or bp_value >= 120
+        or bmi_value >= 25
+        or highest_probability >= 0.35
+    ):
+        st.markdown(
+            '<div class="summary-box summary-warning">This record shows a few mild or moderate signals that are worth watching over time.</div>',
             unsafe_allow_html=True,
         )
     elif latest_values:
         st.markdown(
-            '<div class="summary-box summary-success">Your recent record does not show a major warning sign, but regular check-ups and trend tracking still matter.</div>',
+            '<div class="summary-box summary-success">The latest record looks relatively stable overall, based on the values available here.</div>',
             unsafe_allow_html=True,
         )
     else:
@@ -1970,15 +1989,25 @@ def render_health_check():
         "Creatinine": ["creatinine"],
         "Systolic blood pressure": ["systolic blood pressure"],
     }
-    selected_trend = st.selectbox("Choose a measure", list(trend_options.keys()))
-    trend_patterns = trend_options[selected_trend]
-
     trend_df = observations_df.copy()
     trend_df = trend_df[trend_df["PATIENT"] == patient_id]
     trend_df["VALUE"] = pd.to_numeric(trend_df["VALUE"], errors="coerce")
     date_column = "DATE" if "DATE" in trend_df.columns else "START"
     trend_df[date_column] = pd.to_datetime(trend_df[date_column], errors="coerce")
     trend_df = trend_df.dropna(subset=["VALUE", date_column])
+
+    available_trends = []
+    for label, patterns in trend_options.items():
+        has_points = trend_df["DESCRIPTION"].fillna("").str.lower().apply(
+            lambda text: any(pattern in text for pattern in patterns)
+        ).any()
+        if has_points:
+            available_trends.append(label)
+
+    trend_labels = available_trends if available_trends else list(trend_options.keys())
+    selected_trend = st.selectbox("Choose a measure", trend_labels)
+    trend_patterns = trend_options[selected_trend]
+
     trend_df = trend_df[
         trend_df["DESCRIPTION"].fillna("").str.lower().apply(
             lambda text: any(pattern in text for pattern in trend_patterns)
@@ -1996,7 +2025,7 @@ def render_health_check():
         fig.tight_layout()
         st.pyplot(fig)
     else:
-        st.info("No recent trend data was found for this measure.")
+        st.info(f"No trend chart data was found for {selected_trend.lower()}, even though other latest values may still be available in the record.")
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown('<div class="section-shell">', unsafe_allow_html=True)
