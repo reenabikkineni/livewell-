@@ -670,6 +670,23 @@ def build_latest_values_lookup(observations: pd.DataFrame) -> dict:
 
 
 @st.cache_data
+def build_observation_history_lookup(observations: pd.DataFrame) -> dict:
+    obs = observations.copy()
+    obs["PATIENT"] = obs["PATIENT"].astype(str)
+    obs["VALUE"] = pd.to_numeric(obs["VALUE"], errors="coerce")
+    date_col = "DATE" if "DATE" in obs.columns else "START"
+    obs[date_col] = pd.to_datetime(obs[date_col], errors="coerce")
+    obs["DESCRIPTION_LOWER"] = obs["DESCRIPTION"].fillna("").str.lower()
+    obs = obs.dropna(subset=["VALUE", date_col])
+
+    keep_columns = ["PATIENT", "DESCRIPTION", "DESCRIPTION_LOWER", "VALUE", date_col]
+    return {
+        str(patient_id): group[keep_columns].copy()
+        for patient_id, group in obs.groupby("PATIENT", sort=False)
+    }
+
+
+@st.cache_data
 def build_patient_history_lookups(conditions: pd.DataFrame, encounters: pd.DataFrame) -> tuple[dict, dict]:
     condition_lookup = {
         str(patient_id): group.copy()
@@ -1836,6 +1853,7 @@ def prepare_app_state():
     labels_df = build_labels(patients_df, conditions_df)
     models = train_model(features_df, labels_df)
     latest_values_lookup = build_latest_values_lookup(observations_df)
+    observation_history_lookup = build_observation_history_lookup(observations_df)
     condition_lookup, encounter_lookup = build_patient_history_lookups(conditions_df, encounters_df)
 
     patients_df = patients_df.copy()
@@ -1845,6 +1863,7 @@ def prepare_app_state():
         axis=1,
     )
     patients_df = patients_df.sort_values("FULL_NAME")
+    demo_label_lookup = dict(zip(patients_df["Id"].astype(str), patients_df["DEMO_LABEL"]))
 
     return (
         patients_df,
@@ -1854,8 +1873,10 @@ def prepare_app_state():
         features_df,
         models,
         latest_values_lookup,
+        observation_history_lookup,
         condition_lookup,
         encounter_lookup,
+        demo_label_lookup,
     )
 
 
@@ -1867,8 +1888,10 @@ def prepare_app_state():
     features_df,
     models,
     latest_values_lookup,
+    observation_history_lookup,
     condition_lookup,
     encounter_lookup,
+    demo_label_lookup,
 ) = prepare_app_state()
 
 st.sidebar.markdown("## LiveWell+")
@@ -1888,9 +1911,7 @@ with st.sidebar.expander("Demo settings"):
             "Demo patient",
             demo_picker_df["Id"].astype(str).tolist(),
             index=int(demo_picker_df.index.get_loc(default_patient_row.name)),
-            format_func=lambda selected_id: patients_df.loc[
-                patients_df["Id"].astype(str) == str(selected_id), "DEMO_LABEL"
-            ].iloc[0],
+            format_func=lambda selected_id: demo_label_lookup.get(str(selected_id), str(selected_id)),
             key="demo_patient_id",
         )
         patient_row = patients_df.loc[patients_df["Id"].astype(str) == str(selected_demo_id)].iloc[0]
@@ -2207,18 +2228,16 @@ def render_health_check():
         "Systolic blood pressure": ["systolic blood pressure"],
     }
     combined_uploaded_values = combine_uploaded_report_values(uploaded_reports)
-    trend_df = observations_df.copy()
-    trend_df = trend_df[trend_df["PATIENT"] == patient_id]
-    trend_df["VALUE"] = pd.to_numeric(trend_df["VALUE"], errors="coerce")
+    trend_df = observation_history_lookup.get(str(patient_id), pd.DataFrame()).copy()
     date_column = "DATE" if "DATE" in trend_df.columns else "START"
-    trend_df[date_column] = pd.to_datetime(trend_df[date_column], errors="coerce")
-    trend_df = trend_df.dropna(subset=["VALUE", date_column])
 
     available_trends = []
     for label, patterns in trend_options.items():
-        has_points = trend_df["DESCRIPTION"].fillna("").str.lower().apply(
-            lambda text: any(pattern in text for pattern in patterns)
-        ).any()
+        has_points = False
+        if not trend_df.empty:
+            has_points = trend_df["DESCRIPTION_LOWER"].apply(
+                lambda text: any(pattern in text for pattern in patterns)
+            ).any()
         if has_points or label in combined_uploaded_values:
             available_trends.append(label)
 
@@ -2226,11 +2245,12 @@ def render_health_check():
     selected_trend = st.selectbox("Choose a measure", trend_labels)
     trend_patterns = trend_options[selected_trend]
 
-    trend_df = trend_df[
-        trend_df["DESCRIPTION"].fillna("").str.lower().apply(
-            lambda text: any(pattern in text for pattern in trend_patterns)
-        )
-    ].sort_values(date_column)
+    if not trend_df.empty:
+        trend_df = trend_df[
+            trend_df["DESCRIPTION_LOWER"].apply(
+                lambda text: any(pattern in text for pattern in trend_patterns)
+            )
+        ].sort_values(date_column)
 
     if selected_trend in combined_uploaded_values:
         latest_uploaded_at = None
