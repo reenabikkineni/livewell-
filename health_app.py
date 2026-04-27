@@ -388,7 +388,46 @@ def load_data():
         observations = pd.read_csv(find_data_file("observations.csv"))
 
     patients = patients.copy()
-    patients = patients[patients["STATE"].fillna("").str.lower() == TARGET_STATE.lower()].head(TARGET_PATIENT_COUNT)
+    patients = patients[patients["STATE"].fillna("").str.lower() == TARGET_STATE.lower()].copy()
+    observations = observations.copy()
+    observations["PATIENT"] = observations["PATIENT"].astype(str)
+
+    candidate_ids = set(patients["Id"].astype(str))
+    patient_observations = observations[observations["PATIENT"].isin(candidate_ids)].copy()
+    patient_observations["DESCRIPTION_LOWER"] = patient_observations["DESCRIPTION"].fillna("").str.lower()
+
+    measure_patterns = {
+        "has_glucose": ["glucose"],
+        "has_bmi": ["body mass index", "bmi"],
+        "has_creatinine": ["creatinine"],
+        "has_systolic_bp": ["systolic blood pressure"],
+    }
+
+    coverage = pd.DataFrame({"Id": patients["Id"].astype(str)})
+    for column_name, patterns in measure_patterns.items():
+        matching_patients = set(
+            patient_observations.loc[
+                patient_observations["DESCRIPTION_LOWER"].apply(
+                    lambda text: any(pattern in text for pattern in patterns)
+                ),
+                "PATIENT",
+            ].astype(str)
+        )
+        coverage[column_name] = coverage["Id"].isin(matching_patients).astype(int)
+
+    coverage["measure_coverage"] = coverage[
+        ["has_glucose", "has_bmi", "has_creatinine", "has_systolic_bp"]
+    ].sum(axis=1)
+    coverage["is_default_demo_patient"] = (coverage["Id"] == DEFAULT_DEMO_PATIENT_ID).astype(int)
+
+    patients = patients.merge(coverage, on="Id", how="left")
+    for column_name in ["has_glucose", "has_bmi", "has_creatinine", "has_systolic_bp", "measure_coverage", "is_default_demo_patient"]:
+        patients[column_name] = patients[column_name].fillna(0)
+
+    patients = patients.sort_values(
+        ["is_default_demo_patient", "measure_coverage", "has_glucose", "has_creatinine", "has_bmi", "has_systolic_bp", "Id"],
+        ascending=[False, False, False, False, False, False, True],
+    ).head(TARGET_PATIENT_COUNT)
     selected_patient_ids = set(patients["Id"].astype(str))
 
     observations = observations[observations["PATIENT"].astype(str).isin(selected_patient_ids)].copy()
@@ -459,6 +498,9 @@ def build_features(patients: pd.DataFrame, observations: pd.DataFrame) -> pd.Dat
         if column not in features.columns:
             features[column] = 0.0
         features[column] = pd.to_numeric(features[column], errors="coerce")
+        if column in {"glucose", "bmi", "creatinine", "systolic_bp"}:
+            missing_flag_column = f"{column}_missing"
+            features[missing_flag_column] = features[column].isna().astype(float)
         median_value = features[column].median()
         if pd.isna(median_value):
             median_value = 0.0
@@ -726,6 +768,9 @@ def apply_uploaded_values_to_features(patient_features: pd.DataFrame, uploaded_r
     for label, feature_name in feature_map.items():
         if label in uploaded_values:
             adjusted_features[feature_name] = float(uploaded_values[label])
+            missing_flag_column = f"{feature_name}_missing"
+            if missing_flag_column in adjusted_features.columns:
+                adjusted_features[missing_flag_column] = 0.0
 
     return adjusted_features
 
@@ -741,6 +786,7 @@ def validate_uploaded_file(uploaded_file, patient_id: str):
         "patient_id": None,
         "values": {},
         "notes": [],
+        "uploaded_at": pd.Timestamp.now().isoformat(),
     }
 
     if file_suffix == ".csv":
@@ -1002,6 +1048,34 @@ def has_condition_history(patient_conditions: pd.DataFrame, keywords: list[str])
     return bool(condition_text.apply(lambda text: any(keyword in text for keyword in keywords)).any())
 
 
+def condition_history_boost(patient_conditions: pd.DataFrame, keywords: list[str]) -> float:
+    if patient_conditions.empty:
+        return 0.0
+
+    patient_conditions = patient_conditions.copy()
+    patient_conditions["DESCRIPTION_LOWER"] = patient_conditions["DESCRIPTION"].fillna("").str.lower()
+    matching_conditions = patient_conditions[
+        patient_conditions["DESCRIPTION_LOWER"].apply(lambda text: any(keyword in text for keyword in keywords))
+    ].copy()
+
+    if matching_conditions.empty:
+        return 0.0
+
+    if "START" in matching_conditions.columns:
+        matching_conditions["START"] = pd.to_datetime(matching_conditions["START"], errors="coerce")
+        latest_start = matching_conditions["START"].max()
+        if pd.notna(latest_start):
+            days_since_latest = (pd.Timestamp.now().normalize() - latest_start.normalize()).days
+            if days_since_latest <= 180:
+                return 0.55
+            if days_since_latest <= 365:
+                return 0.45
+
+    if len(matching_conditions) >= 2:
+        return 0.40
+    return 0.30
+
+
 def select_clinically_useful_conditions(patient_conditions: pd.DataFrame) -> pd.DataFrame:
     if patient_conditions.empty:
         return patient_conditions
@@ -1056,6 +1130,7 @@ def build_record_based_disease_scores(
     patient_conditions: pd.DataFrame,
     model_probabilities: dict,
     patient_row: pd.Series,
+    patient_features: pd.DataFrame | None = None,
 ) -> dict:
     scores = {name: float(model_probabilities.get(name, 0.0)) for name in [
         "kidney_disease",
@@ -1070,14 +1145,19 @@ def build_record_based_disease_scores(
     creatinine = latest_values.get("Creatinine")
     bmi = latest_values.get("BMI")
 
-    if has_condition_history(patient_conditions, ["diabetes", "prediabetes"]):
-        scores["diabetes"] = max(scores["diabetes"], 0.85)
-    if has_condition_history(patient_conditions, ["kidney", "renal", "chronic kidney disease", "ckd"]):
-        scores["kidney_disease"] = max(scores["kidney_disease"], 0.85)
-    if has_condition_history(patient_conditions, ["hypertension", "high blood pressure"]):
-        scores["hypertension"] = max(scores["hypertension"], 0.85)
-    if has_condition_history(patient_conditions, ["cardiovascular", "coronary", "heart disease", "myocardial", "cardiac", "stroke", "atherosclerosis"]):
-        scores["cardiovascular_disease"] = max(scores["cardiovascular_disease"], 0.85)
+    diabetes_history_boost = condition_history_boost(patient_conditions, ["diabetes", "prediabetes"])
+    kidney_history_boost = condition_history_boost(patient_conditions, ["kidney", "renal", "chronic kidney disease", "ckd"])
+    hypertension_history_boost = condition_history_boost(patient_conditions, ["hypertension", "high blood pressure"])
+    cardiovascular_history_boost = condition_history_boost(patient_conditions, ["cardiovascular", "coronary", "heart disease", "myocardial", "cardiac", "stroke", "atherosclerosis"])
+
+    if diabetes_history_boost:
+        scores["diabetes"] = max(scores["diabetes"], diabetes_history_boost)
+    if kidney_history_boost:
+        scores["kidney_disease"] = max(scores["kidney_disease"], kidney_history_boost)
+    if hypertension_history_boost:
+        scores["hypertension"] = max(scores["hypertension"], hypertension_history_boost)
+    if cardiovascular_history_boost:
+        scores["cardiovascular_disease"] = max(scores["cardiovascular_disease"], cardiovascular_history_boost)
 
     if blood_sugar is not None:
         if blood_sugar >= 200:
@@ -1124,6 +1204,21 @@ def build_record_based_disease_scores(
         scores["cardiovascular_disease"] = max(scores["cardiovascular_disease"], 0.30)
     elif age_value >= 45:
         scores["cardiovascular_disease"] = max(scores["cardiovascular_disease"], 0.20)
+
+    if patient_features is not None and not patient_features.empty:
+        feature_row = patient_features.iloc[0]
+        missing_feature_map = {
+            "diabetes": ["glucose_missing", "bmi_missing"],
+            "kidney_disease": ["creatinine_missing"],
+            "cardiovascular_disease": ["systolic_bp_missing", "bmi_missing"],
+            "hypertension": ["systolic_bp_missing"],
+        }
+        for disease_name, missing_columns in missing_feature_map.items():
+            missing_values = [float(feature_row.get(column, 0.0)) for column in missing_columns if column in feature_row.index]
+            if missing_values:
+                missing_fraction = sum(missing_values) / len(missing_values)
+                if missing_fraction > 0:
+                    scores[disease_name] = scores[disease_name] * (1 - (0.35 * missing_fraction))
 
     return {name: max(0.0, min(1.0, value)) for name, value in scores.items()}
 
@@ -1533,9 +1628,22 @@ def build_selected_patient_context(
         patient_conditions,
         model_probabilities,
         patient_row,
+        patient_features,
     )
     highest_probability = max(disease_probabilities.values()) if disease_probabilities else 0.0
     systolic_value = latest_values.get("Systolic blood pressure")
+    missing_measure_map = {
+        "Blood sugar": "glucose_missing",
+        "BMI": "bmi_missing",
+        "Creatinine": "creatinine_missing",
+        "Systolic blood pressure": "systolic_bp_missing",
+    }
+    missing_measure_labels = []
+    if not patient_features.empty:
+        feature_row = patient_features.iloc[0]
+        for label, column_name in missing_measure_map.items():
+            if float(feature_row.get(column_name, 0.0)) >= 0.5 and label not in latest_values:
+                missing_measure_labels.append(label)
 
     return {
         "disease_probabilities": disease_probabilities,
@@ -1551,14 +1659,19 @@ def build_selected_patient_context(
         "bp_value_text": f"{systolic_value:.0f} mmHg" if systolic_value is not None else "Not available",
         "first_name": patient_row["FIRST"] if pd.notna(patient_row["FIRST"]) else "Patient",
         "uploaded_report_active": bool(combine_uploaded_report_values(uploaded_reports)),
+        "missing_measure_labels": missing_measure_labels,
     }
 
 
 def choose_demo_patient(patients_df: pd.DataFrame) -> pd.Series:
-    preferred_match = patients_df.loc[patients_df["Id"].astype(str) == DEFAULT_DEMO_PATIENT_ID]
+    demo_ready_patients = patients_df.loc[patients_df.get("measure_coverage", 0) >= 4]
+    if demo_ready_patients.empty:
+        demo_ready_patients = patients_df
+
+    preferred_match = demo_ready_patients.loc[demo_ready_patients["Id"].astype(str) == DEFAULT_DEMO_PATIENT_ID]
     if not preferred_match.empty:
         return preferred_match.iloc[0]
-    return patients_df.iloc[0]
+    return demo_ready_patients.iloc[0]
 
 
 def generate_patient_help_response(
@@ -1642,6 +1755,10 @@ def prepare_app_state():
 
     patients_df = patients_df.copy()
     patients_df["FULL_NAME"] = (patients_df["FIRST"].fillna("") + " " + patients_df["LAST"].fillna("")).str.strip()
+    patients_df["DEMO_LABEL"] = patients_df.apply(
+        lambda row: f"{row['FULL_NAME']} ({str(row['Id'])[-6:]})",
+        axis=1,
+    )
     patients_df = patients_df.sort_values("FULL_NAME")
 
     return (
@@ -1675,17 +1792,23 @@ apply_theme(theme_choice)
 
 default_patient_row = choose_demo_patient(patients_df)
 patient_id = default_patient_row["Id"]
+demo_picker_df = patients_df.loc[patients_df.get("measure_coverage", 0) >= 4].copy()
+if demo_picker_df.empty:
+    demo_picker_df = patients_df.copy()
 
 with st.sidebar.expander("Demo settings"):
     allow_patient_switch = st.checkbox("Change demo patient", value=False, key="allow_demo_patient_switch")
     if allow_patient_switch:
-        selected_demo_name = st.selectbox(
+        selected_demo_id = st.selectbox(
             "Demo patient",
-            patients_df["FULL_NAME"],
-            index=int(patients_df.index.get_loc(default_patient_row.name)),
-            key="demo_patient_name",
+            demo_picker_df["Id"].astype(str).tolist(),
+            index=int(demo_picker_df.index.get_loc(default_patient_row.name)),
+            format_func=lambda selected_id: patients_df.loc[
+                patients_df["Id"].astype(str) == str(selected_id), "DEMO_LABEL"
+            ].iloc[0],
+            key="demo_patient_id",
         )
-        patient_row = patients_df.loc[patients_df["FULL_NAME"] == selected_demo_name].iloc[0]
+        patient_row = patients_df.loc[patients_df["Id"].astype(str) == str(selected_demo_id)].iloc[0]
         patient_id = patient_row["Id"]
     else:
         patient_row = default_patient_row
@@ -1752,6 +1875,7 @@ overall_score = patient_context["overall_score"]
 bp_value_text = patient_context["bp_value_text"]
 first_name = patient_context["first_name"]
 uploaded_report_active = patient_context["uploaded_report_active"]
+missing_measure_labels = patient_context["missing_measure_labels"]
 
 
 def render_home():
@@ -1774,6 +1898,10 @@ def render_home():
             """,
             unsafe_allow_html=True,
         )
+
+    if missing_measure_labels:
+        missing_text = ", ".join(missing_measure_labels)
+        st.info(f"Some scores are based on partial data because this patient does not have recent values for: {missing_text}.")
 
     intro_col, guide_col = st.columns([1.15, 0.85])
     with intro_col:
@@ -1989,6 +2117,7 @@ def render_health_check():
         "Creatinine": ["creatinine"],
         "Systolic blood pressure": ["systolic blood pressure"],
     }
+    combined_uploaded_values = combine_uploaded_report_values(uploaded_reports)
     trend_df = observations_df.copy()
     trend_df = trend_df[trend_df["PATIENT"] == patient_id]
     trend_df["VALUE"] = pd.to_numeric(trend_df["VALUE"], errors="coerce")
@@ -2001,7 +2130,7 @@ def render_health_check():
         has_points = trend_df["DESCRIPTION"].fillna("").str.lower().apply(
             lambda text: any(pattern in text for pattern in patterns)
         ).any()
-        if has_points:
+        if has_points or label in combined_uploaded_values:
             available_trends.append(label)
 
     trend_labels = available_trends if available_trends else list(trend_options.keys())
@@ -2013,6 +2142,27 @@ def render_health_check():
             lambda text: any(pattern in text for pattern in trend_patterns)
         )
     ].sort_values(date_column)
+
+    if selected_trend in combined_uploaded_values:
+        latest_uploaded_at = None
+        for report in uploaded_reports:
+            if selected_trend in report.get("values", {}):
+                report_uploaded_at = pd.to_datetime(report.get("uploaded_at"), errors="coerce")
+                if latest_uploaded_at is None or (pd.notna(report_uploaded_at) and report_uploaded_at > latest_uploaded_at):
+                    latest_uploaded_at = report_uploaded_at
+        if latest_uploaded_at is None or pd.isna(latest_uploaded_at):
+            latest_uploaded_at = pd.Timestamp.now()
+
+        uploaded_row = pd.DataFrame(
+            [
+                {
+                    date_column: latest_uploaded_at,
+                    "VALUE": float(combined_uploaded_values[selected_trend]),
+                    "DESCRIPTION": f"Uploaded {selected_trend}",
+                }
+            ]
+        )
+        trend_df = pd.concat([trend_df, uploaded_row], ignore_index=True).sort_values(date_column)
 
     if not trend_df.empty:
         recent_trend = trend_df.tail(10).copy()
