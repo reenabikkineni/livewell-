@@ -93,6 +93,49 @@ def apply_theme(theme_name: str) -> None:
             border: 1px solid {border} !important;
             color: {text} !important;
         }}
+        [data-testid="stTextArea"] textarea,
+        [data-testid="stTextInput"] input,
+        [data-testid="stNumberInput"] input,
+        textarea,
+        input {{
+            background: {panel} !important;
+            color: {text} !important;
+            border: 1px solid {border} !important;
+            border-radius: 16px !important;
+        }}
+        [data-testid="stTextArea"] textarea::placeholder,
+        [data-testid="stTextInput"] input::placeholder,
+        textarea::placeholder,
+        input::placeholder {{
+            color: {muted} !important;
+        }}
+        [data-testid="stTextArea"] label,
+        [data-testid="stTextInput"] label,
+        [data-testid="stNumberInput"] label {{
+            color: {text} !important;
+            font-weight: 700 !important;
+        }}
+        [data-testid="stTextArea"] > div,
+        [data-testid="stTextInput"] > div,
+        [data-testid="stNumberInput"] > div {{
+            background: transparent !important;
+        }}
+        [data-testid="stExpander"] details,
+        [data-testid="stSidebar"] [data-testid="stExpander"] details {{
+            background: {panel} !important;
+            border: 1px solid {border} !important;
+            border-radius: 18px !important;
+            overflow: hidden !important;
+        }}
+        [data-testid="stExpander"] summary,
+        [data-testid="stSidebar"] [data-testid="stExpander"] summary {{
+            background: {panel} !important;
+            color: {text} !important;
+        }}
+        [data-testid="stExpander"] summary:hover,
+        [data-testid="stSidebar"] [data-testid="stExpander"] summary:hover {{
+            background: {accent_soft} !important;
+        }}
         [data-testid="stFileUploaderDropzone"] {{
             background: {panel} !important;
             border: 1px dashed {border} !important;
