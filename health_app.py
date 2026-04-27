@@ -995,6 +995,13 @@ def get_patient_history(patient_id: str, conditions_df: pd.DataFrame, encounters
     return patient_conditions, patient_encounters
 
 
+def has_condition_history(patient_conditions: pd.DataFrame, keywords: list[str]) -> bool:
+    if patient_conditions.empty:
+        return False
+    condition_text = patient_conditions["DESCRIPTION"].fillna("").str.lower()
+    return bool(condition_text.apply(lambda text: any(keyword in text for keyword in keywords)).any())
+
+
 def select_clinically_useful_conditions(patient_conditions: pd.DataFrame) -> pd.DataFrame:
     if patient_conditions.empty:
         return patient_conditions
@@ -1042,6 +1049,94 @@ def select_clinically_useful_conditions(patient_conditions: pd.DataFrame) -> pd.
     filtered = patient_conditions[include_mask & ~exclude_mask].copy()
 
     return filtered.sort_values("START", ascending=False)
+
+
+def build_record_based_disease_scores(
+    latest_values: dict,
+    patient_conditions: pd.DataFrame,
+    model_probabilities: dict,
+    patient_row: pd.Series,
+) -> dict:
+    scores = {name: float(model_probabilities.get(name, 0.0)) for name in [
+        "kidney_disease",
+        "diabetes",
+        "cardiovascular_disease",
+        "hypertension",
+    ]}
+
+    age_value = CURRENT_YEAR - pd.to_datetime(patient_row["BIRTHDATE"]).year if pd.notna(patient_row["BIRTHDATE"]) else 0
+    systolic_bp = latest_values.get("Systolic blood pressure")
+    blood_sugar = latest_values.get("Blood sugar")
+    creatinine = latest_values.get("Creatinine")
+    bmi = latest_values.get("BMI")
+
+    if has_condition_history(patient_conditions, ["diabetes", "prediabetes"]):
+        scores["diabetes"] = max(scores["diabetes"], 0.85)
+    if has_condition_history(patient_conditions, ["kidney", "renal", "chronic kidney disease", "ckd"]):
+        scores["kidney_disease"] = max(scores["kidney_disease"], 0.85)
+    if has_condition_history(patient_conditions, ["hypertension", "high blood pressure"]):
+        scores["hypertension"] = max(scores["hypertension"], 0.85)
+    if has_condition_history(patient_conditions, ["cardiovascular", "coronary", "heart disease", "myocardial", "cardiac", "stroke", "atherosclerosis"]):
+        scores["cardiovascular_disease"] = max(scores["cardiovascular_disease"], 0.85)
+
+    if blood_sugar is not None:
+        if blood_sugar >= 200:
+            scores["diabetes"] = max(scores["diabetes"], 0.95)
+        elif blood_sugar >= 126:
+            scores["diabetes"] = max(scores["diabetes"], 0.80)
+        elif blood_sugar >= 100:
+            scores["diabetes"] = max(scores["diabetes"], 0.45)
+
+    if creatinine is not None:
+        if creatinine >= 2.0:
+            scores["kidney_disease"] = max(scores["kidney_disease"], 0.95)
+        elif creatinine > 1.3:
+            scores["kidney_disease"] = max(scores["kidney_disease"], 0.80)
+        elif creatinine > 1.1:
+            scores["kidney_disease"] = max(scores["kidney_disease"], 0.45)
+
+    if systolic_bp is not None:
+        if systolic_bp >= 160:
+            scores["hypertension"] = max(scores["hypertension"], 0.95)
+            scores["cardiovascular_disease"] = max(scores["cardiovascular_disease"], 0.75)
+        elif systolic_bp >= 140:
+            scores["hypertension"] = max(scores["hypertension"], 0.85)
+            scores["cardiovascular_disease"] = max(scores["cardiovascular_disease"], 0.60)
+        elif systolic_bp >= 130:
+            scores["hypertension"] = max(scores["hypertension"], 0.65)
+            scores["cardiovascular_disease"] = max(scores["cardiovascular_disease"], 0.45)
+        elif systolic_bp >= 120:
+            scores["hypertension"] = max(scores["hypertension"], 0.35)
+            scores["cardiovascular_disease"] = max(scores["cardiovascular_disease"], 0.25)
+
+    if bmi is not None:
+        if bmi >= 35:
+            scores["diabetes"] = max(scores["diabetes"], 0.55)
+            scores["cardiovascular_disease"] = max(scores["cardiovascular_disease"], 0.45)
+        elif bmi >= 30:
+            scores["diabetes"] = max(scores["diabetes"], 0.45)
+            scores["cardiovascular_disease"] = max(scores["cardiovascular_disease"], 0.35)
+        elif bmi >= 25:
+            scores["diabetes"] = max(scores["diabetes"], 0.30)
+            scores["cardiovascular_disease"] = max(scores["cardiovascular_disease"], 0.25)
+
+    if age_value >= 55:
+        scores["cardiovascular_disease"] = max(scores["cardiovascular_disease"], 0.30)
+    elif age_value >= 45:
+        scores["cardiovascular_disease"] = max(scores["cardiovascular_disease"], 0.20)
+
+    return {name: max(0.0, min(1.0, value)) for name, value in scores.items()}
+
+
+def calculate_overall_health_score(display_scores: dict) -> int:
+    if not display_scores:
+        return 50
+
+    values = list(display_scores.values())
+    highest_score = max(values)
+    average_score = sum(values) / len(values)
+    risk_component = (0.65 * highest_score) + (0.35 * average_score)
+    return max(0, min(100, int(round((1 - risk_component) * 100))))
 
 
 def build_clinical_flags(latest_values: dict, disease_probabilities: dict) -> list[str]:
@@ -1426,26 +1521,33 @@ def build_selected_patient_context(
     uploaded_reports: list[dict] | None = None,
 ):
     patient_id = patient_row["Id"]
-    patient_features = features_df.loc[features_df["Id"] == patient_id].drop(columns=["Id"])
-    patient_features = apply_uploaded_values_to_features(patient_features, uploaded_reports)
-    disease_probabilities = get_disease_probabilities(models, patient_features)
-    diabetes_probability = disease_probabilities.get("diabetes", 0.0)
-    latest_values = latest_values_lookup.get(str(patient_id), {}).copy()
-    latest_values.update(combine_uploaded_report_values(uploaded_reports))
     patient_conditions = condition_lookup.get(str(patient_id), empty_conditions.copy())
     patient_encounters = encounter_lookup.get(str(patient_id), empty_encounters.copy())
+    patient_features = features_df.loc[features_df["Id"] == patient_id].drop(columns=["Id"])
+    patient_features = apply_uploaded_values_to_features(patient_features, uploaded_reports)
+    model_probabilities = get_disease_probabilities(models, patient_features)
+    latest_values = latest_values_lookup.get(str(patient_id), {}).copy()
+    latest_values.update(combine_uploaded_report_values(uploaded_reports))
+    disease_probabilities = build_record_based_disease_scores(
+        latest_values,
+        patient_conditions,
+        model_probabilities,
+        patient_row,
+    )
+    highest_probability = max(disease_probabilities.values()) if disease_probabilities else 0.0
     systolic_value = latest_values.get("Systolic blood pressure")
 
     return {
         "disease_probabilities": disease_probabilities,
-        "diabetes_probability": diabetes_probability,
+        "diabetes_probability": disease_probabilities.get("diabetes", 0.0),
+        "highest_probability": highest_probability,
         "latest_values": latest_values,
         "summary_lines": build_record_summary(latest_values),
-        "next_steps": build_next_steps(diabetes_probability, latest_values),
-        "risk_reasons": build_risk_reasons(patient_row, latest_values, diabetes_probability),
+        "next_steps": build_next_steps(highest_probability, latest_values),
+        "risk_reasons": build_risk_reasons(patient_row, latest_values, highest_probability),
         "patient_conditions": patient_conditions,
         "patient_encounters": patient_encounters,
-        "overall_score": max(0, min(100, int(round((1 - diabetes_probability) * 100)))),
+        "overall_score": calculate_overall_health_score(disease_probabilities),
         "bp_value_text": f"{systolic_value:.0f} mmHg" if systolic_value is not None else "Not available",
         "first_name": patient_row["FIRST"] if pd.notna(patient_row["FIRST"]) else "Patient",
         "uploaded_report_active": bool(combine_uploaded_report_values(uploaded_reports)),
@@ -1639,7 +1741,7 @@ if context_cache_key not in st.session_state:
 
 patient_context = st.session_state[context_cache_key]
 disease_probabilities = patient_context["disease_probabilities"]
-diabetes_probability = patient_context["diabetes_probability"]
+highest_probability = patient_context["highest_probability"]
 latest_values = patient_context["latest_values"]
 summary_lines = patient_context["summary_lines"]
 next_steps = patient_context["next_steps"]
@@ -1653,8 +1755,6 @@ uploaded_report_active = patient_context["uploaded_report_active"]
 
 
 def render_home():
-    highest_probability = max(disease_probabilities.values()) if disease_probabilities else 0.0
-
     st.markdown(
         f"""
         <div class="hero-card">
@@ -1668,7 +1768,7 @@ def render_home():
     if uploaded_report_active and uploaded_reports:
         st.markdown(
             f"""
-            <div class="summary-box summary-success">
+            <div class="summary-box">
                 Uploaded values from {len(uploaded_reports)} file(s) are now being used in this dashboard view.
             </div>
             """,
@@ -1710,7 +1810,7 @@ def render_home():
             <div class="metric-card">
                 <div class="metric-label">Overall Health Score</div>
                 <div class="metric-value">{overall_score} / 100</div>
-                <div class="metric-pill">Based on current record</div>
+                <div class="small-note">Calculated from the current patient record</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1721,7 +1821,7 @@ def render_home():
             <div class="metric-card">
                 <div class="metric-label">Latest Blood Pressure</div>
                 <div class="metric-value">{bp_value_text}</div>
-                <div class="metric-pill">{bp_status(latest_values)}</div>
+                <div class="small-note">Latest recorded systolic value</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1732,7 +1832,7 @@ def render_home():
             <div class="metric-card">
                 <div class="metric-label">Highest Risk Score</div>
                 <div class="metric-value">{highest_probability * 100:.1f}%</div>
-                <div class="metric-pill">Across health checks</div>
+                <div class="small-note">Highest score across the health checks below</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1754,19 +1854,19 @@ def render_home():
                 <div class="metric-card">
                     <div class="metric-label">{pretty_disease_name(disease_name)}</div>
                     <div class="metric-value">{disease_probability * 100:.1f}%</div>
-                    <div class="metric-pill">Risk score</div>
+                    <div class="small-note">Record-based score from current values and history</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
 
     summary_banner = ""
-    if diabetes_probability >= 0.6:
-        summary_banner = '<div class="summary-box summary-error">Your health record shows a stronger warning sign right now. Booking a follow-up visit would be a good next step.</div>'
-    elif diabetes_probability >= 0.35:
-        summary_banner = '<div class="summary-box summary-warning">Your health record shows a moderate warning sign. Keeping an eye on trends and asking about repeat testing could help.</div>'
+    if highest_probability >= 0.6:
+        summary_banner = '<div class="summary-box">Current record review: at least one health check is in a higher-risk range, so a follow-up review would be appropriate.</div>'
+    elif highest_probability >= 0.35:
+        summary_banner = '<div class="summary-box">Current record review: there are moderate signals in this patient record, so trend monitoring and follow-up may help.</div>'
     else:
-        summary_banner = '<div class="summary-box summary-success">Your health record looks more stable right now. Regular check-ups and healthy habits still matter.</div>'
+        summary_banner = '<div class="summary-box">Current record review: the latest values in this patient record look more stable overall.</div>'
 
     summary_items = "".join(f"<li>{line}</li>" for line in summary_lines)
     st.markdown(
