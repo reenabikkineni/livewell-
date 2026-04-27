@@ -148,26 +148,26 @@ def apply_theme(theme_name: str) -> None:
             min-height: 128px;
             box-shadow: 0 12px 24px rgba(15, 23, 42, 0.05);
         }}
-        .metric-card.health-card {{
+        .metric-card.tone-green {{
             border-color: rgba(34, 197, 94, 0.35);
             box-shadow: 0 12px 24px rgba(34, 197, 94, 0.08);
         }}
-        .metric-card.bp-card {{
+        .metric-card.tone-amber {{
+            border-color: rgba(245, 158, 11, 0.35);
+            box-shadow: 0 12px 24px rgba(245, 158, 11, 0.08);
+        }}
+        .metric-card.tone-red {{
             border-color: rgba(239, 68, 68, 0.35);
             box-shadow: 0 12px 24px rgba(239, 68, 68, 0.08);
         }}
-        .metric-card.risk-card {{
-            border-color: rgba(37, 99, 235, 0.35);
-            box-shadow: 0 12px 24px rgba(37, 99, 235, 0.08);
-        }}
-        .metric-value.health {{
+        .metric-value.tone-green {{
             color: #22c55e;
         }}
-        .metric-value.bp {{
-            color: #ef4444;
+        .metric-value.tone-amber {{
+            color: #f59e0b;
         }}
-        .metric-value.risk {{
-            color: #2563eb;
+        .metric-value.tone-red {{
+            color: #ef4444;
         }}
         .metric-status {{
             display: flex;
@@ -1964,6 +1964,10 @@ missing_measure_labels = patient_context["missing_measure_labels"]
 
 
 def render_home():
+    overall_tone = tone_from_score(overall_score)
+    blood_pressure_tone = tone_from_bp(latest_values)
+    highest_risk_tone = tone_from_risk(highest_probability)
+
     st.markdown(
         f"""
         <div class="hero-card">
@@ -2020,9 +2024,9 @@ def render_home():
     with col1:
         st.markdown(
             f"""
-            <div class="metric-card health-card">
+            <div class="metric-card tone-{overall_tone}">
                 <div class="metric-label">Overall Health Score</div>
-                <div class="metric-value health">{overall_score} / 100</div>
+                <div class="metric-value tone-{overall_tone}">{overall_score} / 100</div>
                 <div class="small-note">Calculated from the current patient record</div>
             </div>
             """,
@@ -2031,9 +2035,9 @@ def render_home():
     with col2:
         st.markdown(
             f"""
-            <div class="metric-card bp-card">
+            <div class="metric-card tone-{blood_pressure_tone}">
                 <div class="metric-label">Latest Blood Pressure</div>
-                <div class="metric-value bp">{bp_value_text}</div>
+                <div class="metric-value tone-{blood_pressure_tone}">{bp_value_text}</div>
                 <div class="small-note">Latest recorded systolic value</div>
             </div>
             """,
@@ -2042,9 +2046,9 @@ def render_home():
     with col3:
         st.markdown(
             f"""
-            <div class="metric-card risk-card">
+            <div class="metric-card tone-{highest_risk_tone}">
                 <div class="metric-label">Highest Risk Score</div>
-                <div class="metric-value risk">{highest_probability * 100:.1f}%</div>
+                <div class="metric-value tone-{highest_risk_tone}">{highest_probability * 100:.1f}%</div>
                 <div class="small-note">Highest score across the health checks below</div>
             </div>
             """,
