@@ -148,6 +148,27 @@ def apply_theme(theme_name: str) -> None:
             min-height: 128px;
             box-shadow: 0 12px 24px rgba(15, 23, 42, 0.05);
         }}
+        .metric-card.health-card {{
+            border-color: rgba(34, 197, 94, 0.35);
+            box-shadow: 0 12px 24px rgba(34, 197, 94, 0.08);
+        }}
+        .metric-card.bp-card {{
+            border-color: rgba(239, 68, 68, 0.35);
+            box-shadow: 0 12px 24px rgba(239, 68, 68, 0.08);
+        }}
+        .metric-card.risk-card {{
+            border-color: rgba(37, 99, 235, 0.35);
+            box-shadow: 0 12px 24px rgba(37, 99, 235, 0.08);
+        }}
+        .metric-value.health {{
+            color: #22c55e;
+        }}
+        .metric-value.bp {{
+            color: #ef4444;
+        }}
+        .metric-value.risk {{
+            color: #2563eb;
+        }}
         .metric-status {{
             display: flex;
             align-items: center;
@@ -176,7 +197,7 @@ def apply_theme(theme_name: str) -> None:
             margin-bottom: 0.35rem;
         }}
         .metric-value {{
-            color: {accent};
+            color: {text};
             font-size: 1.95rem;
             font-weight: 800;
             line-height: 1.1;
@@ -1446,6 +1467,48 @@ def explain_medical_term(term: str) -> str:
     )
 
 
+def build_personal_focus(latest_values: dict, disease_probabilities: dict) -> list[str]:
+    focus_points = []
+
+    systolic_bp = latest_values.get("Systolic blood pressure")
+    blood_sugar = latest_values.get("Blood sugar")
+    creatinine = latest_values.get("Creatinine")
+    bmi = latest_values.get("BMI")
+
+    if systolic_bp is not None:
+        if systolic_bp >= 140:
+            focus_points.append(f"Your latest systolic blood pressure is {systolic_bp:.0f} mmHg, which is clearly above the ideal range.")
+        elif systolic_bp >= 120:
+            focus_points.append(f"Your latest systolic blood pressure is {systolic_bp:.0f} mmHg, which is a little above the ideal range.")
+
+    if blood_sugar is not None:
+        if blood_sugar >= 126:
+            focus_points.append(f"Your latest blood sugar is {blood_sugar:.1f}, which is above the usual target range.")
+        elif blood_sugar >= 100:
+            focus_points.append(f"Your latest blood sugar is {blood_sugar:.1f}, which is slightly above the usual target range.")
+
+    if creatinine is not None and creatinine > 1.3:
+        focus_points.append(f"Your latest creatinine is {creatinine:.2f}, so kidney follow-up may matter here.")
+
+    if bmi is not None:
+        if bmi >= 30:
+            focus_points.append(f"Your BMI is {bmi:.1f}, which is in a higher-risk range.")
+        elif bmi >= 25:
+            focus_points.append(f"Your BMI is {bmi:.1f}, which is above the recommended range.")
+
+    highest_disease = max(disease_probabilities, key=disease_probabilities.get)
+    highest_probability = disease_probabilities.get(highest_disease, 0.0)
+    if highest_probability >= 0.35:
+        focus_points.append(
+            f"Your highest current risk score is for {pretty_disease_name(highest_disease).lower()} at {highest_probability * 100:.1f}%."
+        )
+
+    if not focus_points:
+        focus_points.append("Your current record does not show a strong warning signal in the values available here.")
+
+    return focus_points[:4]
+
+
 def build_questions_for_doctor(latest_values: dict, disease_probabilities: dict, patient_conditions: pd.DataFrame) -> list[str]:
     questions = []
 
@@ -1530,30 +1593,39 @@ def build_risk_help(disease_probabilities: dict, latest_values: dict) -> str:
     highest_disease = max(disease_probabilities, key=disease_probabilities.get)
     highest_probability = disease_probabilities.get(highest_disease, 0.0)
     highest_label = pretty_disease_name(highest_disease)
-    level = risk_level(highest_probability)
     reasons = build_clinical_flags(latest_values, disease_probabilities)
+    personal_focus = build_personal_focus(latest_values, disease_probabilities)
 
     return "\n".join(
         [
-            "What your risk result means",
-            f"- The strongest risk signal on this screen is {highest_label.lower()} and it is in the {level.lower()} range ({highest_probability * 100:.1f}%).",
-            "- A risk result is not a diagnosis. It only shows which area may deserve more attention or follow-up.",
+            "What this means for you",
+            f"- The main area the app is watching right now is {highest_label.lower()} at {highest_probability * 100:.1f}%.",
+            "- This is not a diagnosis. It is a signal that this part of your record deserves more attention.",
             "",
-            "What may be affecting it",
+            "What in your record is driving that score",
+            *[f"- {item}" for item in personal_focus],
+            "",
+            "Other supporting details",
             *[f"- {item}" for item in reasons[:4]],
             "",
-            "A useful next step",
-            "- Compare this with future readings and bring the trend to your next check-up.",
+            "Best next step for you",
+            "- Compare this result with future readings and bring it to your next doctor visit.",
         ]
     )
 
 
 def build_next_step_help(disease_probabilities: dict, latest_values: dict) -> str:
     steps = build_next_steps(max(disease_probabilities.values()) if disease_probabilities else 0.0, latest_values)
+    personal_focus = build_personal_focus(latest_values, disease_probabilities)
     return "\n".join(
         [
-            "What to do next",
-            "- Start with the simplest next step that fits your situation.",
+            "What you can do next for your own record",
+            "- Start with the item that best matches the values shown for you right now.",
+            "",
+            "Why the app is saying this",
+            *[f"- {item}" for item in personal_focus],
+            "",
+            "Suggested next steps",
             *[f"- {step}" for step in steps[:5]],
             "",
             "When to contact a doctor sooner",
@@ -1566,15 +1638,15 @@ def build_trend_help(latest_values: dict) -> str:
     summary_lines = build_record_summary(latest_values)
     return "\n".join(
         [
-            "How to understand trends",
-            "- One result can be useful, but repeated results over time are often more helpful.",
-            "- Trends help show whether something is stable, improving, or slowly moving away from the ideal range.",
+            "How to read your trend page",
+            "- Your latest values are a snapshot of where things stand right now.",
+            "- Trend charts are more useful when the same test appears more than once over time.",
             "",
-            "What your current snapshot shows",
+            "What your current record shows",
             *[f"- {line}" for line in summary_lines[:4]],
             "",
-            "Good question to ask",
-            "- Has this value changed meaningfully compared with my past readings?",
+            "Good question for your visit",
+            "- Has this value changed enough over time to matter for me?",
         ]
     )
 
@@ -1687,7 +1759,10 @@ def generate_patient_help_response(
     if "ask my doctor" in normalized_text or "questions for my doctor" in normalized_text:
         questions = build_questions_for_doctor(latest_values, disease_probabilities, patient_conditions)
         return "\n".join(
-            ["Questions you can ask your doctor", *[f"- {question}" for question in questions]]
+            [
+                "Questions based on your current record",
+                *[f"- {question}" for question in questions],
+            ]
         )
 
     if "what does my risk mean" in normalized_text or "why is my risk" in normalized_text or "risk mean" in normalized_text:
@@ -1698,6 +1773,18 @@ def generate_patient_help_response(
 
     if "trend" in normalized_text or "changed over time" in normalized_text or "over time" in normalized_text:
         return build_trend_help(latest_values)
+
+    if "my health" in normalized_text or "my record" in normalized_text or "my data" in normalized_text or "summary" in normalized_text:
+        personal_focus = build_personal_focus(latest_values, disease_probabilities)
+        return "\n".join(
+            [
+                "What your record is showing right now",
+                *[f"- {item}" for item in personal_focus],
+                "",
+                "What to do with this information",
+                "- Use it to decide what to ask at your next check-up and what values to track over time.",
+            ]
+        )
 
     if "report" in normalized_text or "download" in normalized_text or "share with doctor" in normalized_text:
         return build_report_help()
@@ -1726,20 +1813,18 @@ def generate_patient_help_response(
 
     return "\n".join(
         [
-            "I can help with these kinds of questions",
-            "- Explain a medical term in simple language.",
-            "- Suggest useful questions to ask a doctor.",
-            "- Help turn symptoms into a clearer message for a doctor.",
-            "- Explain what a risk result means.",
-            "- Explain what to do next.",
-            "- Explain how to think about trends or the report.",
+            "I can help you understand your own record here",
+            "- Explain what one of your values means.",
+            "- Tell you what in your record is pushing a score up.",
+            "- Suggest useful questions for your doctor based on your results.",
+            "- Help you understand what to do next.",
+            "- Explain how to read your trend page or report.",
             "",
-            "Try one of these",
-            "- What does creatinine mean?",
-            "- What should I ask my doctor?",
-            "- I have headache and dizziness for 2 days.",
-            "- What does my risk mean?",
-            "- What should I do next?",
+            "Try asking",
+            "- What does my blood pressure mean?",
+            "- What in my record looks most important right now?",
+            "- Why is my risk score like this?",
+            "- What should I ask my doctor next?",
         ]
     )
 
@@ -1935,9 +2020,9 @@ def render_home():
     with col1:
         st.markdown(
             f"""
-            <div class="metric-card">
+            <div class="metric-card health-card">
                 <div class="metric-label">Overall Health Score</div>
-                <div class="metric-value">{overall_score} / 100</div>
+                <div class="metric-value health">{overall_score} / 100</div>
                 <div class="small-note">Calculated from the current patient record</div>
             </div>
             """,
@@ -1946,9 +2031,9 @@ def render_home():
     with col2:
         st.markdown(
             f"""
-            <div class="metric-card">
+            <div class="metric-card bp-card">
                 <div class="metric-label">Latest Blood Pressure</div>
-                <div class="metric-value">{bp_value_text}</div>
+                <div class="metric-value bp">{bp_value_text}</div>
                 <div class="small-note">Latest recorded systolic value</div>
             </div>
             """,
@@ -1957,9 +2042,9 @@ def render_home():
     with col3:
         st.markdown(
             f"""
-            <div class="metric-card">
+            <div class="metric-card risk-card">
                 <div class="metric-label">Highest Risk Score</div>
-                <div class="metric-value">{highest_probability * 100:.1f}%</div>
+                <div class="metric-value risk">{highest_probability * 100:.1f}%</div>
                 <div class="small-note">Highest score across the health checks below</div>
             </div>
             """,
@@ -2180,7 +2265,7 @@ def render_health_check():
 
     st.markdown('<div class="section-shell">', unsafe_allow_html=True)
     st.subheader("Smart Patient Help")
-    st.caption("Ask one question here. This helper can explain hard terms, help with symptoms, and suggest useful questions for a doctor.")
+    st.caption("Ask about your own results here. This helper uses the values and scores already shown in your record.")
 
     smart_help_input_key = f"smart_help_input_{patient_id}"
     smart_help_result_key = f"smart_help_result_{patient_id}"
@@ -2190,14 +2275,14 @@ def render_health_check():
 
     suggestion_col1, suggestion_col2, suggestion_col3 = st.columns(3)
     with suggestion_col1:
-        if st.button("What does creatinine mean?", key=f"smart_suggestion_term_{patient_id}"):
-            st.session_state[smart_help_input_key] = "What does creatinine mean?"
+        if st.button("What matters most right now?", key=f"smart_suggestion_term_{patient_id}"):
+            st.session_state[smart_help_input_key] = "What in my record looks most important right now?"
     with suggestion_col2:
         if st.button("What should I ask my doctor?", key=f"smart_suggestion_doctor_{patient_id}"):
-            st.session_state[smart_help_input_key] = "What should I ask my doctor?"
+            st.session_state[smart_help_input_key] = "What should I ask my doctor about my results?"
     with suggestion_col3:
-        if st.button("I have headache and dizziness", key=f"smart_suggestion_symptom_{patient_id}"):
-            st.session_state[smart_help_input_key] = "I have headache and dizziness for 2 days."
+        if st.button("Explain my blood pressure", key=f"smart_suggestion_symptom_{patient_id}"):
+            st.session_state[smart_help_input_key] = "What does my blood pressure mean?"
 
     with st.form(key=f"smart_help_form_{patient_id}", clear_on_submit=False):
         user_text = st.text_area(
@@ -2219,7 +2304,7 @@ def render_health_check():
     if st.session_state.get(smart_help_result_key):
         st.markdown(report_preview_html(st.session_state[smart_help_result_key]), unsafe_allow_html=True)
     else:
-        st.info("Try a question like: What does creatinine mean? What should I ask my doctor? I have headache and dizziness.")
+        st.info("Try a question like: What in my record looks most important right now? What should I ask my doctor about my results? What does my blood pressure mean?")
 
     if uploaded_reports:
         st.markdown("**Uploaded Report Summary**")
