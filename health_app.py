@@ -516,13 +516,18 @@ def train_model(features: pd.DataFrame, labels: pd.DataFrame):
             stratify=y_data,
         )
 
+        positive_count = int(y_train.sum())
+        negative_count = int((y_train == 0).sum())
+        scale_pos_weight = negative_count / max(positive_count, 1)
+
         model = xgb.XGBClassifier(
             eval_metric="logloss",
-            n_estimators=35,
-            max_depth=3,
-            learning_rate=0.1,
-            subsample=0.85,
-            colsample_bytree=0.85,
+            n_estimators=120,
+            max_depth=4,
+            learning_rate=0.08,
+            subsample=0.9,
+            colsample_bytree=0.9,
+            scale_pos_weight=scale_pos_weight,
             random_state=42,
             n_jobs=1,
         )
@@ -1648,11 +1653,7 @@ uploaded_report_active = patient_context["uploaded_report_active"]
 
 
 def render_home():
-    overall_tone = tone_from_score(overall_score)
-    blood_pressure_status = bp_status(latest_values)
-    blood_pressure_tone = tone_from_bp(latest_values)
-    overall_alert = overall_alert_level(disease_probabilities)
-    overall_alert_tone = tone_from_risk(max(disease_probabilities.values()) if disease_probabilities else 0.0)
+    highest_probability = max(disease_probabilities.values()) if disease_probabilities else 0.0
 
     st.markdown(
         f"""
@@ -1707,10 +1708,9 @@ def render_home():
         st.markdown(
             f"""
             <div class="metric-card">
-                <div class="metric-status"><span class="status-dot {overall_tone}"></span><span class="small-note">Score status</span></div>
                 <div class="metric-label">Overall Health Score</div>
                 <div class="metric-value">{overall_score} / 100</div>
-                <div class="metric-pill {overall_tone}">{icon_for_tone(overall_tone)} Based on current record</div>
+                <div class="metric-pill">Based on current record</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1719,10 +1719,9 @@ def render_home():
         st.markdown(
             f"""
             <div class="metric-card">
-                <div class="metric-status"><span class="status-dot {blood_pressure_tone}"></span><span class="small-note">Blood pressure status</span></div>
                 <div class="metric-label">Latest Blood Pressure</div>
                 <div class="metric-value">{bp_value_text}</div>
-                <div class="metric-pill {blood_pressure_tone}">{icon_for_tone(blood_pressure_tone)} {blood_pressure_status}</div>
+                <div class="metric-pill">{bp_status(latest_values)}</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1731,10 +1730,9 @@ def render_home():
         st.markdown(
             f"""
             <div class="metric-card">
-                <div class="metric-status"><span class="status-dot {overall_alert_tone}"></span><span class="small-note">Overall alert status</span></div>
-                <div class="metric-label">Risk Alert Level</div>
-                <div class="metric-value">{overall_alert}</div>
-                <div class="metric-pill {overall_alert_tone}">{icon_for_tone(overall_alert_tone)} Across health checks</div>
+                <div class="metric-label">Highest Risk Score</div>
+                <div class="metric-value">{highest_probability * 100:.1f}%</div>
+                <div class="metric-pill">Across health checks</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -1750,15 +1748,13 @@ def render_home():
     ]
     for column, disease_name in zip(disease_columns, ordered_diseases):
         disease_probability = disease_probabilities.get(disease_name, 0.0)
-        disease_tone = tone_from_risk(disease_probability)
         with column:
             st.markdown(
                 f"""
                 <div class="metric-card">
-                    <div class="metric-status"><span class="status-dot {disease_tone}"></span><span class="small-note">Risk signal</span></div>
                     <div class="metric-label">{pretty_disease_name(disease_name)}</div>
-                    <div class="metric-value">{risk_level(disease_probability)}</div>
-                    <div class="metric-pill {disease_tone}">{icon_for_tone(disease_tone)} {disease_probability * 100:.1f}% chance</div>
+                    <div class="metric-value">{disease_probability * 100:.1f}%</div>
+                    <div class="metric-pill">Risk score</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
