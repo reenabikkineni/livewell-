@@ -1132,6 +1132,14 @@ def pretty_disease_name(disease_name: str) -> str:
     return names.get(disease_name, disease_name.replace("_", " ").title())
 
 
+def highest_risk_condition(disease_probabilities: dict) -> tuple[str, float]:
+    if not disease_probabilities:
+        return "No clear signal", 0.0
+    disease_name = max(disease_probabilities, key=disease_probabilities.get)
+    probability = disease_probabilities.get(disease_name, 0.0)
+    return pretty_disease_name(disease_name), probability
+
+
 def overall_alert_level(disease_probabilities: dict) -> str:
     if not disease_probabilities:
         return "Low"
@@ -1408,7 +1416,7 @@ def build_clinical_flags(latest_values: dict, disease_probabilities: dict) -> li
         disease_probability = disease_probabilities.get(disease_name, 0.0)
         if disease_probability >= 0.2:
             flags.append(
-                f"{pretty_disease_name(disease_name)} risk estimate: {risk_level(disease_probability)} ({disease_probability * 100:.1f}%)"
+                f"{pretty_disease_name(disease_name)} record-based signal: {risk_level(disease_probability)} ({disease_probability * 100:.1f}%)"
             )
 
     if not flags:
@@ -1438,7 +1446,7 @@ def build_doctor_key_findings(latest_values: dict, disease_probabilities: dict) 
     for disease_name, probability in ranked_risks[:2]:
         if probability >= 0.2:
             findings.append(
-                f"{pretty_disease_name(disease_name)} risk signal in the {risk_level(probability).lower()} range ({probability * 100:.1f}%)."
+                f"{pretty_disease_name(disease_name)} record-based signal in the {risk_level(probability).lower()} range ({probability * 100:.1f}%)."
             )
 
     if not findings:
@@ -1460,7 +1468,7 @@ def build_doctor_follow_up(latest_values: dict, disease_probabilities: dict) -> 
     highest_disease = max(disease_probabilities, key=disease_probabilities.get)
     highest_probability = disease_probabilities.get(highest_disease, 0.0)
     if highest_probability >= 0.35:
-        follow_up.append(f"Review {pretty_disease_name(highest_disease).lower()} risk signal in context of prior history and current labs.")
+        follow_up.append(f"Review the {pretty_disease_name(highest_disease).lower()} signal in context of prior history and current labs.")
 
     if not follow_up:
         follow_up.append("Continue routine preventive follow-up and trend monitoring.")
@@ -1488,13 +1496,13 @@ def build_report_text(
         f"- Age: {age_value}",
         f"- Sex: {sex_value}",
         "",
-        "Risk checks:",
+        "Record review areas:",
     ]
 
     for disease_name in ["kidney_disease", "diabetes", "cardiovascular_disease", "hypertension"]:
         disease_probability = disease_probabilities.get(disease_name, 0.0)
         lines.append(
-            f"- {pretty_disease_name(disease_name)}: {risk_level(disease_probability)} ({disease_probability * 100:.1f}%)"
+            f"- {pretty_disease_name(disease_name)}: {risk_level(disease_probability)} record-based signal ({disease_probability * 100:.1f}%)"
         )
 
     lines.append("")
@@ -1844,7 +1852,7 @@ def build_personal_focus(latest_values: dict, disease_probabilities: dict) -> li
     highest_probability = disease_probabilities.get(highest_disease, 0.0)
     if highest_probability >= 0.35:
         focus_points.append(
-            f"Your highest current risk score is for {pretty_disease_name(highest_disease).lower()} at {highest_probability * 100:.1f}%."
+            f"The strongest current record-based signal is for {pretty_disease_name(highest_disease).lower()} at {highest_probability * 100:.1f}%."
         )
 
     if not focus_points:
@@ -1943,8 +1951,8 @@ def build_risk_help(disease_probabilities: dict, latest_values: dict) -> str:
     return "\n".join(
         [
             "What this means for you",
-            f"- The main area the app is watching right now is {highest_label.lower()} at {highest_probability * 100:.1f}%.",
-            "- This is not a diagnosis. It is a signal that this part of your record deserves more attention.",
+            f"- The strongest record-based signal right now is for {highest_label.lower()} at {highest_probability * 100:.1f}%.",
+            "- This does not confirm a diagnosis. It means this part of your record deserves closer follow-up.",
             "",
             "What in your record is driving that score",
             *[f"- {item}" for item in personal_focus],
@@ -2396,6 +2404,7 @@ def render_home():
     overall_tone = tone_from_score(overall_score)
     blood_pressure_tone = tone_from_bp(latest_values)
     highest_risk_tone = tone_from_risk(highest_probability)
+    highest_risk_name, highest_risk_probability = highest_risk_condition(disease_probabilities)
     doctor_questions = build_questions_for_doctor(latest_values, disease_probabilities, patient_conditions)
     action_cards = build_action_cards(next_steps, doctor_questions, risk_reasons)
 
@@ -2480,9 +2489,9 @@ def render_home():
         st.markdown(
             f"""
             <div class="metric-card tone-{highest_risk_tone}">
-                <div class="metric-label">Highest Risk Score</div>
-                <div class="metric-value tone-{highest_risk_tone}">{highest_probability * 100:.1f}%</div>
-                <div class="small-note">Highest score across the health checks below</div>
+                <div class="metric-label">Main Area To Review</div>
+                <div class="metric-value tone-{highest_risk_tone}">{highest_risk_name}</div>
+                <div class="small-note">Current record-based signal: {risk_level(highest_risk_probability)} ({highest_risk_probability * 100:.1f}%)</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -2504,7 +2513,7 @@ def render_home():
                 <div class="metric-card">
                     <div class="metric-label">{pretty_disease_name(disease_name)}</div>
                     <div class="metric-value">{disease_probability * 100:.1f}%</div>
-                    <div class="small-note">Record-based score from current values and history</div>
+                    <div class="small-note">Record-based signal from current values and history</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
