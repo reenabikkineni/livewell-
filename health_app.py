@@ -93,6 +93,62 @@ def apply_theme(theme_name: str) -> None:
             border: 1px solid {border} !important;
             color: {text} !important;
         }}
+        [data-baseweb="select"] input {{
+            color: {text} !important;
+            -webkit-text-fill-color: {text} !important;
+        }}
+        div[data-baseweb="popover"],
+        div[data-baseweb="popover"] > div,
+        div[data-baseweb="popover"] > div > div,
+        div[role="listbox"],
+        ul[role="listbox"],
+        [data-baseweb="menu"],
+        [data-baseweb="select"] [role="listbox"] {{
+            background: #ffffff !important;
+            background-color: #ffffff !important;
+            color: #16304f !important;
+            border: 1px solid #d6e1f0 !important;
+            box-shadow: 0 18px 40px rgba(15, 23, 42, 0.16) !important;
+        }}
+        div[data-baseweb="popover"] *,
+        div[data-baseweb="popover"] *::before,
+        div[data-baseweb="popover"] *::after,
+        div[role="listbox"] *,
+        ul[role="listbox"] *,
+        [data-baseweb="menu"] *,
+        [role="option"] * {{
+            background: transparent !important;
+            background-color: transparent !important;
+            color: #16304f !important;
+            -webkit-text-fill-color: #16304f !important;
+        }}
+        div[role="option"],
+        li[role="option"],
+        [data-baseweb="menu"] li,
+        [data-baseweb="menu"] div,
+        [data-baseweb="menu"] ul > li {{
+            background: #ffffff !important;
+            background-color: #ffffff !important;
+            color: #16304f !important;
+        }}
+        div[role="option"]:hover,
+        li[role="option"]:hover,
+        [data-baseweb="menu"] li:hover,
+        [data-baseweb="menu"] div:hover,
+        [data-baseweb="menu"] ul > li:hover {{
+            background: #eff7ff !important;
+            background-color: #eff7ff !important;
+            color: #16304f !important;
+        }}
+        div[aria-selected="true"][role="option"],
+        li[aria-selected="true"][role="option"],
+        [data-baseweb="menu"] [aria-selected="true"],
+        [data-baseweb="menu"] ul > li[aria-selected="true"] {{
+            background: #eff7ff !important;
+            background-color: #eff7ff !important;
+            color: #1677d2 !important;
+            font-weight: 700 !important;
+        }}
         [data-testid="stTextArea"] textarea,
         [data-testid="stTextInput"] input,
         [data-testid="stNumberInput"] input,
@@ -119,6 +175,22 @@ def apply_theme(theme_name: str) -> None:
         [data-testid="stTextInput"] > div,
         [data-testid="stNumberInput"] > div {{
             background: transparent !important;
+        }}
+        [data-testid="stFormSubmitButton"] button {{
+            background: linear-gradient(135deg, #0f6cbd 0%, #1677d2 100%) !important;
+            border: 1px solid #0f6cbd !important;
+            border-radius: 999px !important;
+            min-height: 46px !important;
+            padding: 0.6rem 1.35rem !important;
+            font-size: 0.98rem !important;
+            font-weight: 800 !important;
+            letter-spacing: 0.01em !important;
+            box-shadow: 0 12px 24px rgba(15, 108, 189, 0.22) !important;
+        }}
+        [data-testid="stFormSubmitButton"] button:hover {{
+            background: linear-gradient(135deg, #0c5ca2 0%, #125fa7 100%) !important;
+            border-color: #0c5ca2 !important;
+            transform: translateY(-1px);
         }}
         [data-testid="stExpander"] details,
         [data-testid="stSidebar"] [data-testid="stExpander"] details {{
@@ -1736,6 +1808,113 @@ def build_trust_and_limits() -> list[str]:
     ]
 
 
+def build_intro_steps() -> list[dict]:
+    return [
+        {
+            "title": "1. Start Here",
+            "body": "Choose the patient, check the top summary cards, and see whether anything looks clearly above the ideal range.",
+        },
+        {
+            "title": "2. Understand Why",
+            "body": "Open Health Check to see which values were used, what was missing, and why the app is highlighting a specific condition.",
+        },
+        {
+            "title": "3. Take Action",
+            "body": "Use the guidance, doctor questions, and report download to turn the prediction into a practical next step.",
+        },
+    ]
+
+
+def build_model_method_lines() -> list[str]:
+    return [
+        "Predictions are based only on the columns available in this dataset: age, sex, blood sugar, BMI, creatinine, and systolic blood pressure.",
+        "Uploaded lab files can replace the record value for those same measures during the current session.",
+        "If a needed measure is missing, the model fills it with a typical dataset value and reduces how strongly that result should be trusted.",
+        "The final score also includes simple rule checks so obviously abnormal values are not hidden by the model.",
+    ]
+
+
+def build_reliability_lines(missing_measure_labels: list[str], uploaded_reports: list[dict] | None = None) -> list[str]:
+    reliability_lines = []
+    if uploaded_reports:
+        reliability_lines.append("Uploaded files are being used in this view, so the latest score reflects both the record and the validated uploads.")
+    if missing_measure_labels:
+        reliability_lines.append(
+            f"Confidence is lower because recent values were missing for: {', '.join(missing_measure_labels)}."
+        )
+    else:
+        reliability_lines.append("Confidence is stronger here because the main measures used by the model are available.")
+
+    reliability_lines.extend(
+        [
+            "This app uses synthetic patient data, so results are best understood as a prototype decision-support view.",
+            "Risk scores estimate chance, not certainty, and should be checked against symptoms, repeat labs, and clinical judgment.",
+        ]
+    )
+    return reliability_lines
+
+
+def build_prediction_input_table(
+    patient_row: pd.Series,
+    latest_values: dict,
+    patient_features: pd.DataFrame,
+    uploaded_reports: list[dict] | None = None,
+) -> pd.DataFrame:
+    uploaded_values = combine_uploaded_report_values(uploaded_reports)
+    age_value = CURRENT_YEAR - pd.to_datetime(patient_row["BIRTHDATE"]).year if pd.notna(patient_row["BIRTHDATE"]) else None
+    sex_value = patient_row["GENDER"].title() if pd.notna(patient_row["GENDER"]) else "Not available"
+
+    rows = [
+        {"Input used": "Age", "Value used": age_value if age_value is not None else "Not available", "Source": "Patient record"},
+        {"Input used": "Sex", "Value used": sex_value, "Source": "Patient record"},
+    ]
+
+    feature_row = patient_features.iloc[0] if not patient_features.empty else pd.Series(dtype="object")
+    measure_map = [
+        ("Blood sugar", "glucose_missing", "{:.1f}"),
+        ("BMI", "bmi_missing", "{:.1f}"),
+        ("Creatinine", "creatinine_missing", "{:.2f}"),
+        ("Systolic blood pressure", "systolic_bp_missing", "{:.0f} mmHg"),
+    ]
+
+    for label, missing_column, template in measure_map:
+        value = latest_values.get(label)
+        is_missing = float(feature_row.get(missing_column, 0.0)) >= 0.5 if not patient_features.empty else value is None
+
+        if label in uploaded_values:
+            source = "Uploaded file"
+        elif is_missing or value is None:
+            source = "Missing in record; model fallback used"
+        else:
+            source = "Patient record"
+
+        if value is None:
+            value_text = "Not available"
+        else:
+            value_text = template.format(float(value))
+
+        rows.append({"Input used": label, "Value used": value_text, "Source": source})
+
+    return pd.DataFrame(rows)
+
+
+def build_action_cards(next_steps: list[str], questions: list[str], risk_reasons: list[str]) -> list[dict]:
+    return [
+        {
+            "title": "What To Do",
+            "body": next_steps[0] if next_steps else "Keep following routine preventive care.",
+        },
+        {
+            "title": "What To Ask",
+            "body": questions[0] if questions else "Ask which result matters most to follow over time.",
+        },
+        {
+            "title": "What We Are Watching",
+            "body": risk_reasons[0] if risk_reasons else "No major warning sign is standing out in the current snapshot.",
+        },
+    ]
+
+
 def build_selected_patient_context(
     patient_row: pd.Series,
     features_df: pd.DataFrame,
@@ -1792,6 +1971,9 @@ def build_selected_patient_context(
         "first_name": patient_row["FIRST"] if pd.notna(patient_row["FIRST"]) else "Patient",
         "uploaded_report_active": bool(combine_uploaded_report_values(uploaded_reports)),
         "missing_measure_labels": missing_measure_labels,
+        "prediction_input_table": build_prediction_input_table(patient_row, latest_values, patient_features, uploaded_reports),
+        "model_method_lines": build_model_method_lines(),
+        "reliability_lines": build_reliability_lines(missing_measure_labels, uploaded_reports),
     }
 
 
@@ -1938,7 +2120,7 @@ def prepare_app_state():
 ) = prepare_app_state()
 
 st.sidebar.markdown("## LiveWell+")
-theme_choice = st.sidebar.radio("Background", ["Dark", "Light"], index=0)
+theme_choice = st.sidebar.radio("Background", ["Light", "Dark"], index=0)
 apply_theme(theme_choice)
 
 default_patient_row = choose_demo_patient(patients_df)
@@ -1969,6 +2151,7 @@ st.sidebar.markdown(
     <div class="info-card" style="margin-top:0.75rem;padding:0.9rem 1rem;">
         <div class="small-note" style="margin-bottom:0.25rem;">Your profile</div>
         <div style="font-weight:800;font-size:1.05rem;">{patient_name}</div>
+        <div class="small-note" style="margin-top:0.35rem;">Light theme is the default for clearer projected presentation.</div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -2025,22 +2208,30 @@ bp_value_text = patient_context["bp_value_text"]
 first_name = patient_context["first_name"]
 uploaded_report_active = patient_context["uploaded_report_active"]
 missing_measure_labels = patient_context["missing_measure_labels"]
+prediction_input_table = patient_context["prediction_input_table"]
+model_method_lines = patient_context["model_method_lines"]
+reliability_lines = patient_context["reliability_lines"]
 
 
 def render_home():
     overall_tone = tone_from_score(overall_score)
     blood_pressure_tone = tone_from_bp(latest_values)
     highest_risk_tone = tone_from_risk(highest_probability)
+    intro_steps = build_intro_steps()
+    doctor_questions = build_questions_for_doctor(latest_values, disease_probabilities, patient_conditions)
+    action_cards = build_action_cards(next_steps, doctor_questions, risk_reasons)
 
     st.markdown(
         f"""
         <div class="hero-card">
             <div style="font-size:2.3rem;font-weight:800;">Welcome, {first_name}!</div>
-            <div class="small-note">A simple app to help you understand your health information.</div>
+            <div class="small-note">A simple app to help you understand your health information and turn it into a clear next step.</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
+
+    st.caption("Scores load from pre-trained models plus simple safety rules, so this view should stay responsive during demos.")
 
     if uploaded_report_active and uploaded_reports:
         st.markdown(
@@ -2055,6 +2246,20 @@ def render_home():
     if missing_measure_labels:
         missing_text = ", ".join(missing_measure_labels)
         st.info(f"Some scores are based on partial data because this patient does not have recent values for: {missing_text}.")
+
+    st.subheader("Quick Walkthrough")
+    intro_columns = st.columns(3)
+    for column, step in zip(intro_columns, intro_steps):
+        with column:
+            st.markdown(
+                f"""
+                <div class="info-card">
+                    <div class="info-title">{step['title']}</div>
+                    <div>{step['body']}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
     intro_col, guide_col = st.columns([1.15, 0.85])
     with intro_col:
@@ -2186,6 +2391,20 @@ def render_home():
             unsafe_allow_html=True,
         )
 
+    st.subheader("Action Snapshot")
+    action_columns = st.columns(3)
+    for column, card in zip(action_columns, action_cards):
+        with column:
+            st.markdown(
+                f"""
+                <div class="info-card">
+                    <div class="info-title">{card['title']}</div>
+                    <div>{card['body']}</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
 
 def render_history():
     st.markdown('<div class="section-shell">', unsafe_allow_html=True)
@@ -2213,6 +2432,8 @@ def render_history():
 
 
 def render_health_check():
+    doctor_questions = build_questions_for_doctor(latest_values, disease_probabilities, patient_conditions)
+
     st.markdown('<div class="section-shell">', unsafe_allow_html=True)
     st.subheader("Health Check")
     st.caption("This page uses the information already in your health record.")
@@ -2258,6 +2479,30 @@ def render_health_check():
     else:
         st.markdown(
             '<div class="summary-box summary-warning">There are not enough recent record values yet to build a stronger health check.</div>',
+            unsafe_allow_html=True,
+        )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown('<div class="section-shell">', unsafe_allow_html=True)
+    st.subheader("Why These Scores Were Generated")
+    transparency_col, method_col = st.columns([1.15, 0.85])
+    with transparency_col:
+        st.write("**Inputs used for the prediction**")
+        render_html_table(prediction_input_table)
+    with method_col:
+        method_items = "".join(f"<li>{line}</li>" for line in model_method_lines)
+        reliability_items = "".join(f"<li>{line}</li>" for line in reliability_lines)
+        st.markdown(
+            f"""
+            <div class="info-card">
+                <div class="info-title">How the score is built</div>
+                <ul class="info-list">{method_items}</ul>
+            </div>
+            <div class="info-card" style="margin-top:1rem;">
+                <div class="info-title">Reliability and limits</div>
+                <ul class="info-list">{reliability_items}</ul>
+            </div>
+            """,
             unsafe_allow_html=True,
         )
     st.markdown("</div>", unsafe_allow_html=True)
@@ -2331,6 +2576,33 @@ def render_health_check():
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown('<div class="section-shell">', unsafe_allow_html=True)
+    st.subheader("Guidance For The User")
+    guide_col1, guide_col2 = st.columns(2)
+    with guide_col1:
+        next_step_items = "".join(f"<li>{step}</li>" for step in next_steps[:5])
+        st.markdown(
+            f"""
+            <div class="info-card">
+                <div class="info-title">Practical advice right now</div>
+                <ul class="info-list">{next_step_items}</ul>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with guide_col2:
+        question_items = "".join(f"<li>{question}</li>" for question in doctor_questions[:5])
+        st.markdown(
+            f"""
+            <div class="info-card">
+                <div class="info-title">Questions to ask a doctor</div>
+                <ul class="info-list">{question_items}</ul>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown('<div class="section-shell">', unsafe_allow_html=True)
     st.subheader("Smart Patient Help")
     st.caption("Ask about your own results here. This helper uses the values and scores already shown in your record.")
 
@@ -2358,7 +2630,7 @@ def render_health_check():
             height=120,
             placeholder="Type your question here...",
         )
-        asked = st.form_submit_button("Ask")
+        asked = st.form_submit_button("Ask Smart Help")
 
     if asked:
         st.session_state[smart_help_result_key] = generate_patient_help_response(
@@ -2403,6 +2675,19 @@ def render_reports():
 
     st.write("**Preview**")
     st.markdown(report_preview_html(report_text), unsafe_allow_html=True)
+
+    method_items = "".join(f"<li>{line}</li>" for line in model_method_lines[:3])
+    reliability_items = "".join(f"<li>{line}</li>" for line in reliability_lines)
+    st.markdown(
+        f"""
+        <div class="info-card" style="margin-top:1rem;">
+            <div class="info-title">How to explain this report</div>
+            <ul class="info-list">{method_items}</ul>
+            <ul class="info-list">{reliability_items}</ul>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     if uploaded_reports:
         st.write("**Uploaded Hospital-Style Files**")
