@@ -5,6 +5,7 @@ import re
 import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
+import xgboost as xgb
 
 
 st.set_page_config(page_title="LiveWell+", page_icon="👤", layout="wide")
@@ -664,6 +665,79 @@ def build_features(patients: pd.DataFrame, observations: pd.DataFrame) -> pd.Dat
         features[column] = features[column].fillna(median_value)
 
     return features
+
+
+@st.cache_data
+def build_labels(patients: pd.DataFrame, conditions: pd.DataFrame) -> pd.DataFrame:
+    labels = pd.DataFrame({"Id": patients["Id"]})
+    condition_text = conditions["DESCRIPTION"].fillna("").str.lower()
+
+    disease_patterns = {
+        "diabetes": ["diabetes"],
+        "kidney_disease": ["chronic kidney disease", "kidney disease", "renal"],
+        "cardiovascular_disease": [
+            "cardiovascular",
+            "coronary",
+            "heart disease",
+            "myocardial",
+            "cardiac",
+            "stroke",
+            "atherosclerosis",
+        ],
+        "hypertension": ["hypertension", "high blood pressure"],
+    }
+
+    for disease_name, patterns in disease_patterns.items():
+        mask = condition_text.apply(lambda text: any(pattern in text for pattern in patterns))
+        labels[disease_name] = patients["Id"].isin(
+            conditions.loc[mask, "PATIENT"]
+        ).astype(int)
+
+    return labels
+
+
+@st.cache_resource
+def train_model(features: pd.DataFrame, labels: pd.DataFrame):
+    x_data = features.drop(columns=["Id"])
+    disease_models = {}
+
+    for disease_name in [col for col in labels.columns if col != "Id"]:
+        y_data = labels[disease_name]
+
+        if y_data.nunique() < 2:
+            disease_models[disease_name] = None
+            continue
+
+        positive_count = int(y_data.sum())
+        negative_count = int((y_data == 0).sum())
+        scale_pos_weight = negative_count / max(positive_count, 1)
+
+        model = xgb.XGBClassifier(
+            eval_metric="logloss",
+            n_estimators=60,
+            max_depth=3,
+            learning_rate=0.1,
+            subsample=0.9,
+            colsample_bytree=0.9,
+            scale_pos_weight=scale_pos_weight,
+            random_state=42,
+            n_jobs=1,
+            tree_method="hist",
+        )
+        model.fit(x_data, y_data)
+        disease_models[disease_name] = model
+
+    return disease_models
+
+
+def get_disease_probabilities(models: dict, patient_features: pd.DataFrame) -> dict:
+    probabilities = {}
+    for disease_name, model in models.items():
+        if model is None:
+            probabilities[disease_name] = 0.0
+        else:
+            probabilities[disease_name] = float(model.predict_proba(patient_features)[0][1])
+    return probabilities
 
 
 @st.cache_data
@@ -2006,6 +2080,7 @@ def build_action_cards(next_steps: list[str], questions: list[str], risk_reasons
 def build_selected_patient_context(
     patient_row: pd.Series,
     features_df: pd.DataFrame,
+    models: dict,
     latest_values_lookup: dict,
     condition_lookup: dict,
     encounter_lookup: dict,
@@ -2018,12 +2093,13 @@ def build_selected_patient_context(
     patient_encounters = encounter_lookup.get(str(patient_id), empty_encounters.copy())
     patient_features = features_df.loc[features_df["Id"] == patient_id].drop(columns=["Id"])
     patient_features = apply_uploaded_values_to_features(patient_features, uploaded_reports)
+    model_probabilities = get_disease_probabilities(models, patient_features)
     latest_values = latest_values_lookup.get(str(patient_id), {}).copy()
     latest_values.update(combine_uploaded_report_values(uploaded_reports))
     disease_probabilities = build_record_based_disease_scores(
         latest_values,
         patient_conditions,
-        {},
+        model_probabilities,
         patient_row,
         patient_features,
     )
@@ -2174,6 +2250,8 @@ def generate_patient_help_response(
 def prepare_app_state():
     patients_df, observations_df, conditions_df, encounters_df = load_data()
     features_df = build_features(patients_df, observations_df)
+    labels_df = build_labels(patients_df, conditions_df)
+    models = train_model(features_df, labels_df)
     latest_values_lookup = build_latest_values_lookup(observations_df)
     observation_history_lookup = build_observation_history_lookup(observations_df)
     condition_lookup, encounter_lookup = build_patient_history_lookups(conditions_df, encounters_df)
@@ -2193,6 +2271,7 @@ def prepare_app_state():
         conditions_df,
         encounters_df,
         features_df,
+        models,
         latest_values_lookup,
         observation_history_lookup,
         condition_lookup,
@@ -2207,6 +2286,7 @@ def prepare_app_state():
     conditions_df,
     encounters_df,
     features_df,
+    models,
     latest_values_lookup,
     observation_history_lookup,
     condition_lookup,
@@ -2279,6 +2359,7 @@ if context_cache_key not in st.session_state:
     st.session_state[context_cache_key] = build_selected_patient_context(
         patient_row,
         features_df,
+        models,
         latest_values_lookup,
         condition_lookup,
         encounter_lookup,
