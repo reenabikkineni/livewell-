@@ -1,0 +1,21 @@
+RIVER VALLEY PRIMARY CARE
+Visit Summary
+
+Patient Name: Abbey813 Trantow673
+Patient ID: 5395e5b4-e7e6-c0c9-4641-21130cb00819
+Visit Date: 2025-05-20
+Clinician: Melissa Grant, MD
+
+Purpose Of Visit
+Routine preventive follow-up and review of recent measurements.
+
+Measurements Reviewed
+Glucose: 81.2 mg/dL
+Creatinine: 0.90 mg/dL
+BMI: 30.1 kg/m2
+SBP: 101 mmHg
+
+Summary
+Current blood pressure, blood sugar, and kidney markers are reassuring on this visit. Weight-related risk remains an area to follow over time.
+
+Clinical Note: Patient encouraged to continue routine follow-up and discuss weight, activity, and nutrition goals at the next preventive appointment.
