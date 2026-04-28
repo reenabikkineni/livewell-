@@ -1599,6 +1599,191 @@ def explain_medical_term(term: str) -> str:
     )
 
 
+def classify_measure_status(label: str, value: float | None) -> tuple[str, str, list[str]]:
+    if value is None:
+        return (
+            "Not available",
+            f"There is no recent {label.lower()} value in this record yet.",
+            ["Ask whether this measurement should be checked at your next visit."],
+        )
+
+    if label == "BMI":
+        if value >= 30:
+            return (
+                "Higher range",
+                f"Your BMI is {value:.1f}, which is in a higher range and can add to long-term heart, blood pressure, and blood sugar risk.",
+                [
+                    "Focus on steady habits like regular walking, sleep, and balanced meals rather than quick fixes.",
+                    "Ask what amount of weight change would make a meaningful difference for your health.",
+                ],
+            )
+        if value >= 25:
+            return (
+                "Above recommended range",
+                f"Your BMI is {value:.1f}, which is above the recommended range and may make some long-term risks a little higher.",
+                [
+                    "Small changes in daily activity, food routine, and sleep can still help over time.",
+                    "Ask whether weight, waist size, or blood sugar should be followed together.",
+                ],
+            )
+        return (
+            "Within typical range",
+            f"Your BMI is {value:.1f}, which is in a more typical range based on this record.",
+            [
+                "Keep up the routines that support your current weight, movement, and sleep habits.",
+            ],
+        )
+
+    if label == "Blood sugar":
+        if value >= 126:
+            return (
+                "Above target range",
+                f"Your blood sugar is {value:.1f}, which is above the usual target range and may need repeat testing or follow-up.",
+                [
+                    "Ask whether repeat glucose testing or an HbA1c test is needed.",
+                    "Pay attention to thirst, fatigue, or frequent urination if they are happening.",
+                ],
+            )
+        if value >= 100:
+            return (
+                "Slightly above target range",
+                f"Your blood sugar is {value:.1f}, which is slightly above the usual target range.",
+                [
+                    "Ask whether this should be rechecked, especially if you have risk factors or symptoms.",
+                    "Food pattern, activity, sleep, and weight can all affect this over time.",
+                ],
+            )
+        return (
+            "Within typical range",
+            f"Your blood sugar is {value:.1f}, which looks more stable in this snapshot.",
+            [
+                "Keep following the habits that support steady blood sugar over time.",
+            ],
+        )
+
+    if label == "Creatinine":
+        if value > 1.3:
+            return (
+                "Above reference range",
+                f"Your creatinine is {value:.2f}, which may mean your kidneys need closer follow-up.",
+                [
+                    "Ask whether kidney function should be repeated or reviewed with other kidney tests.",
+                    "Make sure your doctor knows about medicines, dehydration, or any kidney history.",
+                ],
+            )
+        if value > 1.1:
+            return (
+                "A little above ideal",
+                f"Your creatinine is {value:.2f}, which is a little above the ideal range and may be worth watching over time.",
+                [
+                    "Ask whether this change matters in your overall history and whether repeat testing is needed.",
+                ],
+            )
+        return (
+            "Within typical range",
+            f"Your creatinine is {value:.2f}, which looks more reassuring in this snapshot.",
+            [
+                "Keep an eye on future kidney-related labs if they are repeated later.",
+            ],
+        )
+
+    if label == "Systolic blood pressure":
+        if value >= 140:
+            return (
+                "High",
+                f"Your systolic blood pressure is {value:.0f} mmHg, which is clearly above the ideal range.",
+                [
+                    "Ask whether you should start checking blood pressure regularly at home.",
+                    "Bring any headaches, dizziness, or medication concerns into that conversation.",
+                ],
+            )
+        if value >= 120:
+            return (
+                "Elevated",
+                f"Your systolic blood pressure is {value:.0f} mmHg, which is a little above the ideal range.",
+                [
+                    "Trends matter here, so ask whether repeat readings or home checks would help.",
+                    "Sleep, stress, salt intake, activity, and weight can all affect blood pressure.",
+                ],
+            )
+        return (
+            "Within typical range",
+            f"Your systolic blood pressure is {value:.0f} mmHg, which looks more stable in this snapshot.",
+            [
+                "Keep up the routines that support blood pressure, like activity, sleep, and regular check-ups.",
+            ],
+        )
+
+    return (
+        "Measured",
+        f"Your latest {label.lower()} value is {value}.",
+        ["Ask how this result should be interpreted together with your other health values."],
+    )
+
+
+def build_personal_measure_help(
+    measure_label: str,
+    latest_values: dict,
+    disease_probabilities: dict,
+    patient_conditions: pd.DataFrame,
+) -> str:
+    value = latest_values.get(measure_label)
+    status_label, meaning_text, care_tips = classify_measure_status(measure_label, value)
+    doctor_questions = build_questions_for_doctor(latest_values, disease_probabilities, patient_conditions)
+
+    intro_line = f"Your latest {measure_label.lower()} is not available in this record."
+    if value is not None:
+        if measure_label == "BMI":
+            intro_line = f"Your latest BMI is {value:.1f}."
+        elif measure_label == "Creatinine":
+            intro_line = f"Your latest creatinine is {value:.2f}."
+        elif measure_label == "Blood sugar":
+            intro_line = f"Your latest blood sugar is {value:.1f}."
+        elif measure_label == "Systolic blood pressure":
+            intro_line = f"Your latest systolic blood pressure is {value:.0f} mmHg."
+
+    lines = [
+        f"About your {measure_label.lower()}",
+        f"- {intro_line}",
+        f"- Current reading: {status_label}.",
+        "",
+        "What this can mean for you",
+        f"- {meaning_text}",
+        f"- {explain_medical_term(measure_label)}",
+        "",
+        "How to take care of it",
+        *[f"- {tip}" for tip in care_tips],
+        "",
+        "Helpful question for your next visit",
+        f"- {doctor_questions[0] if doctor_questions else f'How should I interpret my {measure_label.lower()} in the context of my full record?'}",
+    ]
+
+    return "\n".join(lines)
+
+
+def build_personal_health_update(
+    latest_values: dict,
+    disease_probabilities: dict,
+    patient_conditions: pd.DataFrame,
+) -> str:
+    personal_focus = build_personal_focus(latest_values, disease_probabilities)
+    doctor_questions = build_questions_for_doctor(latest_values, disease_probabilities, patient_conditions)
+    next_steps = build_next_steps(max(disease_probabilities.values()) if disease_probabilities else 0.0, latest_values)
+
+    return "\n".join(
+        [
+            "Your health update right now",
+            *[f"- {item}" for item in personal_focus],
+            "",
+            "What to focus on next",
+            *[f"- {step}" for step in next_steps[:4]],
+            "",
+            "A useful question to ask",
+            f"- {doctor_questions[0] if doctor_questions else 'Which of these results matters most to follow over time?'}",
+        ]
+    )
+
+
 def build_personal_focus(latest_values: dict, disease_probabilities: dict) -> list[str]:
     focus_points = []
 
@@ -1995,6 +2180,7 @@ def generate_patient_help_response(
     patient_conditions: pd.DataFrame,
 ) -> str:
     normalized_text = user_text.strip().lower()
+    normalized_text = re.sub(r"\bbp\b", "blood pressure", normalized_text)
     if not normalized_text:
         return "Type a question like 'What does creatinine mean?', 'What should I ask my doctor?', or 'I have headache and dizziness'."
 
@@ -2016,17 +2202,36 @@ def generate_patient_help_response(
     if "trend" in normalized_text or "changed over time" in normalized_text or "over time" in normalized_text:
         return build_trend_help(latest_values)
 
+    personal_measure_map = {
+        "BMI": ["my bmi", "my body mass index", "bmi", "body mass index"],
+        "Blood sugar": ["my blood sugar", "my glucose", "blood sugar", "glucose"],
+        "Creatinine": ["my creatinine", "creatinine"],
+        "Systolic blood pressure": ["my blood pressure", "systolic blood pressure", "blood pressure"],
+    }
+    personal_question_markers = [
+        "my",
+        "for me",
+        "affect me",
+        "effects me",
+        "take care",
+        "what is",
+        "how is",
+        "how does",
+    ]
+    if any(marker in normalized_text for marker in personal_question_markers):
+        for measure_label, keywords in personal_measure_map.items():
+            if any(keyword in normalized_text for keyword in keywords):
+                return build_personal_measure_help(measure_label, latest_values, disease_probabilities, patient_conditions)
+
+    for measure_label, keywords in personal_measure_map.items():
+        if any(keyword in normalized_text for keyword in keywords):
+            return build_personal_measure_help(measure_label, latest_values, disease_probabilities, patient_conditions)
+
+    if "health update" in normalized_text or "health updates" in normalized_text or "update me on my health" in normalized_text:
+        return build_personal_health_update(latest_values, disease_probabilities, patient_conditions)
+
     if "my health" in normalized_text or "my record" in normalized_text or "my data" in normalized_text or "summary" in normalized_text:
-        personal_focus = build_personal_focus(latest_values, disease_probabilities)
-        return "\n".join(
-            [
-                "What your record is showing right now",
-                *[f"- {item}" for item in personal_focus],
-                "",
-                "What to do with this information",
-                "- Use it to decide what to ask at your next check-up and what values to track over time.",
-            ]
-        )
+        return build_personal_health_update(latest_values, disease_probabilities, patient_conditions)
 
     if "report" in normalized_text or "download" in normalized_text or "share with doctor" in normalized_text:
         return build_report_help()
@@ -2484,30 +2689,6 @@ def render_health_check():
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown('<div class="section-shell">', unsafe_allow_html=True)
-    st.subheader("Why These Scores Were Generated")
-    transparency_col, method_col = st.columns([1.15, 0.85])
-    with transparency_col:
-        st.write("**Inputs used for the prediction**")
-        render_html_table(prediction_input_table)
-    with method_col:
-        method_items = "".join(f"<li>{line}</li>" for line in model_method_lines)
-        reliability_items = "".join(f"<li>{line}</li>" for line in reliability_lines)
-        st.markdown(
-            f"""
-            <div class="info-card">
-                <div class="info-title">How the score is built</div>
-                <ul class="info-list">{method_items}</ul>
-            </div>
-            <div class="info-card" style="margin-top:1rem;">
-                <div class="info-title">Reliability and limits</div>
-                <ul class="info-list">{reliability_items}</ul>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    st.markdown('<div class="section-shell">', unsafe_allow_html=True)
     st.subheader("Health Trend")
     trend_options = {
         "Blood sugar": ["glucose"],
@@ -2621,14 +2802,14 @@ def render_health_check():
             st.session_state[smart_help_input_key] = "What should I ask my doctor about my results?"
     with suggestion_col3:
         if st.button("Explain my blood pressure", key=f"smart_suggestion_symptom_{patient_id}"):
-            st.session_state[smart_help_input_key] = "What does my blood pressure mean?"
+            st.session_state[smart_help_input_key] = "What is my blood pressure and is it normal for my situation?"
 
     with st.form(key=f"smart_help_form_{patient_id}", clear_on_submit=False):
         user_text = st.text_area(
             "Ask Smart Patient Help",
             key=smart_help_input_key,
             height=120,
-            placeholder="Type your question here...",
+            placeholder="Try: What is my BMI and how does it affect me? What is my blood pressure and is it normal for me? Give me my health update.",
         )
         asked = st.form_submit_button("Ask Smart Help")
 
@@ -2643,7 +2824,7 @@ def render_health_check():
     if st.session_state.get(smart_help_result_key):
         st.markdown(report_preview_html(st.session_state[smart_help_result_key]), unsafe_allow_html=True)
     else:
-        st.info("Try a question like: What in my record looks most important right now? What should I ask my doctor about my results? What does my blood pressure mean?")
+        st.info("Try a question like: What is my BMI and how does it affect me? What is my blood pressure and is it normal for me? Give me my health update.")
 
     if uploaded_reports:
         st.markdown("**Uploaded Report Summary**")
