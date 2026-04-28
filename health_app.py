@@ -1742,26 +1742,198 @@ def detect_measure_label(normalized_text: str) -> str | None:
     return None
 
 
+def detect_condition_label(normalized_text: str) -> str | None:
+    condition_map = {
+        "diabetes": ["diabetes", "diabetic", "high sugar", "sugar problem"],
+        "kidney_disease": ["kidney disease", "kidney problem", "kidney issue", "kidney health"],
+        "cardiovascular_disease": ["cardiovascular disease", "heart disease", "heart risk", "heart health"],
+        "hypertension": ["hypertension", "high blood pressure"],
+    }
+    for condition_label, keywords in condition_map.items():
+        if any(keyword in normalized_text for keyword in keywords):
+            return condition_label
+    return None
+
+
+def detect_help_intents(normalized_text: str) -> dict[str, bool]:
+    return {
+        "why": any(phrase in normalized_text for phrase in ["why is", "why am i", "why does", "causing", "reason"]),
+        "reduce": any(
+            phrase in normalized_text
+            for phrase in [
+                "how to reduce",
+                "how do i reduce",
+                "how can i reduce",
+                "how to lower",
+                "how do i lower",
+                "how can i lower",
+                "improve",
+                "bring down",
+                "control",
+                "manage",
+                "take care of",
+                "come over",
+                "overcome",
+            ]
+        ),
+        "food": any(phrase in normalized_text for phrase in ["what should i eat", "diet", "food", "meals", "eat more", "eat less", "avoid"]),
+        "activity": any(phrase in normalized_text for phrase in ["exercise", "activity", "walk", "workout"]),
+        "normal": any(phrase in normalized_text for phrase in ["is my", "normal", "okay", "ok", "fine", "too high", "too low"]),
+        "affect": any(phrase in normalized_text for phrase in ["affect me", "harm me", "mean for me", "what happens if"]),
+        "doctor": any(phrase in normalized_text for phrase in ["doctor", "visit", "check-up", "checkup"]),
+    }
+
+
+def format_measure_value(measure_label: str, value: float | None) -> str:
+    if value is None:
+        return f"Your latest {measure_label.lower()} is not available in this record."
+    if measure_label == "BMI":
+        return f"Your latest BMI is {value:.1f}."
+    if measure_label == "Creatinine":
+        return f"Your latest creatinine is {value:.2f}."
+    if measure_label == "Blood sugar":
+        return f"Your latest blood sugar is {value:.1f}."
+    if measure_label == "Systolic blood pressure":
+        return f"Your latest systolic blood pressure is {value:.0f} mmHg."
+    return f"Your latest {measure_label.lower()} is {value}."
+
+
+def build_measure_reason_lines(measure_label: str, latest_values: dict) -> list[str]:
+    bmi = latest_values.get("BMI")
+    systolic_bp = latest_values.get("Systolic blood pressure")
+
+    if measure_label == "BMI":
+        return [
+            "BMI can rise when food intake, movement, sleep, stress, or long-term routines are not in balance.",
+            "A higher BMI can also push blood pressure, blood sugar, and heart risk upward over time.",
+        ]
+    if measure_label == "Blood sugar":
+        reasons = ["Blood sugar can run higher because of food pattern, weight, sleep, stress, illness, or diabetes risk."]
+        if bmi is not None and bmi >= 25:
+            reasons.append(f"Your BMI is {bmi:.1f}, which can make blood sugar harder to keep in range over time.")
+        return reasons
+    if measure_label == "Systolic blood pressure":
+        reasons = ["Blood pressure can be affected by salt, stress, sleep, activity, weight, pain, and some medicines."]
+        if bmi is not None and bmi >= 25:
+            reasons.append(f"Your BMI is {bmi:.1f}, which can also make blood pressure harder to control.")
+        return reasons
+    if measure_label == "Creatinine":
+        reasons = ["Creatinine can change with kidney function, dehydration, illness, and some medicines."]
+        if systolic_bp is not None and systolic_bp >= 140:
+            reasons.append(f"Your blood pressure is also elevated at {systolic_bp:.0f} mmHg, so kidney follow-up matters even more.")
+        return reasons
+    return ["This value is best interpreted together with your other results and your symptoms."]
+
+
+def build_measure_care_lines(measure_label: str, intents: dict[str, bool]) -> list[str]:
+    if measure_label == "BMI":
+        lines = [
+            "Aim for steady changes rather than quick fixes: regular walking, more daily movement, and consistent sleep usually help more than short diets.",
+            "Build meals around vegetables, protein, and fiber, and cut back on sugary drinks and frequent ultra-processed snacks if those are part of your routine.",
+            "Even modest weight change over time can help blood pressure and blood sugar.",
+        ]
+        if intents["activity"]:
+            lines.insert(0, "A realistic starting point is walking most days of the week and slowly increasing the time or intensity.")
+        if intents["food"]:
+            lines.insert(0, "Try meals that keep you fuller longer, like protein plus fiber, instead of relying on highly sugary or refined foods.")
+        return lines
+
+    if measure_label == "Blood sugar":
+        return [
+            "Regular meals, less sugary drinks, and more routine movement can help keep blood sugar steadier.",
+            "A short walk after meals can help some people bring blood sugar down over time.",
+            "If this stays high, ask whether repeat glucose or HbA1c testing is needed.",
+        ]
+
+    if measure_label == "Systolic blood pressure":
+        return [
+            "Home blood pressure checks, lower salt intake, regular activity, and better sleep can all help.",
+            "If stress is a trigger for you, calming routines and consistent sleep may make a difference too.",
+            "If readings stay elevated, bring a home log to your doctor visit.",
+        ]
+
+    if measure_label == "Creatinine":
+        return [
+            "Stay hydrated unless a doctor has told you to limit fluids.",
+            "Ask whether any of your medicines, supplements, or pain relievers could affect kidney function.",
+            "If this value is rising over time, repeat kidney testing may be needed.",
+        ]
+
+    return ["Ask how this value should be followed together with your other results."]
+
+
+def build_personal_condition_help(
+    condition_label: str,
+    latest_values: dict,
+    disease_probabilities: dict,
+) -> str:
+    condition_name = pretty_disease_name(condition_label)
+    probability = disease_probabilities.get(condition_label, 0.0)
+    key_points = []
+
+    if condition_label == "diabetes":
+        blood_sugar = latest_values.get("Blood sugar")
+        bmi = latest_values.get("BMI")
+        if blood_sugar is not None:
+            key_points.append(f"Your current blood sugar is {blood_sugar:.1f}.")
+        if bmi is not None and bmi >= 25:
+            key_points.append(f"Your BMI is {bmi:.1f}, which can make blood sugar harder to manage over time.")
+        next_step = "Ask whether repeat glucose or HbA1c testing is needed."
+    elif condition_label == "kidney_disease":
+        creatinine = latest_values.get("Creatinine")
+        systolic_bp = latest_values.get("Systolic blood pressure")
+        if creatinine is not None:
+            key_points.append(f"Your current creatinine is {creatinine:.2f}.")
+        if systolic_bp is not None and systolic_bp >= 140:
+            key_points.append(f"Your blood pressure is elevated at {systolic_bp:.0f} mmHg, which can matter for kidney health.")
+        next_step = "Ask whether kidney function should be repeated or reviewed with other kidney tests."
+    elif condition_label == "hypertension":
+        systolic_bp = latest_values.get("Systolic blood pressure")
+        if systolic_bp is not None:
+            key_points.append(f"Your current systolic blood pressure is {systolic_bp:.0f} mmHg.")
+        next_step = "Ask whether home blood pressure checks or repeat readings would help."
+    else:
+        systolic_bp = latest_values.get("Systolic blood pressure")
+        bmi = latest_values.get("BMI")
+        if systolic_bp is not None:
+            key_points.append(f"Your blood pressure is {systolic_bp:.0f} mmHg.")
+        if bmi is not None and bmi >= 25:
+            key_points.append(f"Your BMI is {bmi:.1f}, which can affect long-term heart risk.")
+        next_step = "Ask which heart-risk factors matter most for you to work on first."
+
+    if not key_points:
+        key_points.append("This answer is based on the values available in your current record.")
+
+    return "\n".join(
+        [
+            f"About {condition_name.lower()} in your record",
+            f"- Current app signal: {risk_level(probability)} ({probability * 100:.1f}%).",
+            "- This does not confirm a diagnosis. It shows an area that may deserve follow-up.",
+            "",
+            "What in your record may be related",
+            *[f"- {item}" for item in key_points[:3]],
+            "",
+            "Good next step",
+            f"- {next_step}",
+        ]
+    )
+
+
 def build_personal_measure_help(
     measure_label: str,
     latest_values: dict,
     disease_probabilities: dict,
     patient_conditions: pd.DataFrame,
+    user_text: str = "",
 ) -> str:
     value = latest_values.get(measure_label)
     status_label, meaning_text, care_tips = classify_measure_status(measure_label, value)
+    intents = detect_help_intents(user_text.strip().lower())
     follow_up_question = build_measure_follow_up_question(measure_label, latest_values, disease_probabilities)
-
-    intro_line = f"Your latest {measure_label.lower()} is not available in this record."
-    if value is not None:
-        if measure_label == "BMI":
-            intro_line = f"Your latest BMI is {value:.1f}."
-        elif measure_label == "Creatinine":
-            intro_line = f"Your latest creatinine is {value:.2f}."
-        elif measure_label == "Blood sugar":
-            intro_line = f"Your latest blood sugar is {value:.1f}."
-        elif measure_label == "Systolic blood pressure":
-            intro_line = f"Your latest systolic blood pressure is {value:.0f} mmHg."
+    intro_line = format_measure_value(measure_label, value)
+    reason_lines = build_measure_reason_lines(measure_label, latest_values)
+    action_lines = build_measure_care_lines(measure_label, intents)
+    action_lines.extend([tip for tip in care_tips if tip not in action_lines])
 
     lines = [
         f"About your {measure_label.lower()}",
@@ -1771,13 +1943,27 @@ def build_personal_measure_help(
         "What this can mean for you",
         f"- {meaning_text}",
         f"- {explain_medical_term(measure_label)}",
-        "",
-        "How to take care of it",
-        *[f"- {tip}" for tip in care_tips],
-        "",
-        "Helpful question for your next visit",
-        f"- {follow_up_question}",
     ]
+
+    if intents["why"] or intents["affect"]:
+        lines.extend(
+            [
+                "",
+                "Why this may matter in your case",
+                *[f"- {item}" for item in reason_lines[:3]],
+            ]
+        )
+
+    lines.extend(
+        [
+            "",
+            "How to take care of it",
+            *[f"- {tip}" for tip in action_lines[:4]],
+            "",
+            "Helpful question for your next visit",
+            f"- {follow_up_question}",
+        ]
+    )
 
     return "\n".join(lines)
 
@@ -2159,6 +2345,7 @@ def generate_patient_help_response(
         return "Type a question like 'What does creatinine mean?', 'What should I ask my doctor?', or 'I have headache and dizziness'."
 
     measure_label = detect_measure_label(normalized_text)
+    condition_label = detect_condition_label(normalized_text)
     symptom_keywords = [
         "pain", "headache", "dizziness", "dizzy", "tired", "fatigue", "swelling",
         "thirst", "thirsty", "urinating", "pee", "breathing", "cough", "fever",
@@ -2171,7 +2358,15 @@ def generate_patient_help_response(
         "explain my",
         "is my",
         "how does my",
+        "why is my",
         "how can i take care",
+        "how do i reduce",
+        "how can i reduce",
+        "how do i lower",
+        "how can i lower",
+        "how do i improve",
+        "what should i eat",
+        "what should i avoid",
         "affect me",
         "normal for me",
         "normal for my situation",
@@ -2199,13 +2394,16 @@ def generate_patient_help_response(
         return build_trend_help(latest_values)
 
     if explicit_measure_intent:
-        return build_personal_measure_help(measure_label, latest_values, disease_probabilities, patient_conditions)
+        return build_personal_measure_help(measure_label, latest_values, disease_probabilities, patient_conditions, user_text)
 
     if "health update" in normalized_text or "health updates" in normalized_text or "update me on my health" in normalized_text:
         return build_personal_health_update(latest_values, disease_probabilities, patient_conditions)
 
     if "my health" in normalized_text or "my record" in normalized_text or "my data" in normalized_text or "summary" in normalized_text:
         return build_personal_health_update(latest_values, disease_probabilities, patient_conditions)
+
+    if condition_label is not None:
+        return build_personal_condition_help(condition_label, latest_values, disease_probabilities)
 
     if "report" in normalized_text or "download" in normalized_text or "share with doctor" in normalized_text:
         return build_report_help()
@@ -2223,7 +2421,10 @@ def generate_patient_help_response(
         return build_symptom_helper(user_text)
 
     if measure_label is not None and ("my" in normalized_text or "for me" in normalized_text):
-        return build_personal_measure_help(measure_label, latest_values, disease_probabilities, patient_conditions)
+        return build_personal_measure_help(measure_label, latest_values, disease_probabilities, patient_conditions, user_text)
+
+    if measure_label is not None:
+        return build_personal_measure_help(measure_label, latest_values, disease_probabilities, patient_conditions, user_text)
 
     if known_term_match:
         return explain_medical_term(known_term_match)
@@ -2231,16 +2432,16 @@ def generate_patient_help_response(
     return "\n".join(
         [
             "I can help you understand your own record here",
-            "- Explain what one of your values means.",
-            "- Tell you what in your record is pushing a score up.",
+            "- Explain one of your own values in simple words.",
+            "- Tell you why one of your values may be high or important.",
+            "- Suggest ways to lower or improve a result based on your record.",
             "- Suggest useful questions for your doctor based on your results.",
             "- Help you understand what to do next.",
-            "- Explain how to read your trend page or report.",
             "",
             "Try asking",
-            "- What does my blood pressure mean?",
+            "- Why is my BMI high and how can I reduce it?",
+            "- What does my blood pressure mean for me?",
             "- What in my record looks most important right now?",
-            "- Why is my risk score like this?",
             "- What should I ask my doctor next?",
         ]
     )
@@ -2734,8 +2935,8 @@ def render_health_check():
         if st.button("What matters most right now?", key=f"smart_suggestion_term_{patient_id}"):
             st.session_state[smart_help_input_key] = "What in my record looks most important right now?"
     with suggestion_col2:
-        if st.button("What should I ask my doctor?", key=f"smart_suggestion_doctor_{patient_id}"):
-            st.session_state[smart_help_input_key] = "What should I ask my doctor about my results?"
+        if st.button("Why is my BMI high?", key=f"smart_suggestion_doctor_{patient_id}"):
+            st.session_state[smart_help_input_key] = "Why is my BMI high and how can I reduce it?"
     with suggestion_col3:
         if st.button("Explain my blood pressure", key=f"smart_suggestion_symptom_{patient_id}"):
             st.session_state[smart_help_input_key] = "What is my blood pressure and is it normal for my situation?"
@@ -2745,7 +2946,7 @@ def render_health_check():
             "Ask Smart Patient Help",
             key=smart_help_input_key,
             height=120,
-            placeholder="Try: What is my BMI and how does it affect me? What is my blood pressure and is it normal for me? Give me my health update.",
+            placeholder="Try: Why is my BMI high and how can I reduce it? What is my blood pressure and is it normal for me? What should I eat to help my blood sugar?",
         )
         asked = st.form_submit_button("Ask Smart Help")
 
@@ -2760,7 +2961,7 @@ def render_health_check():
     if st.session_state.get(smart_help_result_key):
         st.markdown(report_preview_html(st.session_state[smart_help_result_key]), unsafe_allow_html=True)
     else:
-        st.info("Try a question like: What is my BMI and how does it affect me? What is my blood pressure and is it normal for me? Give me my health update.")
+        st.info("Try a question like: Why is my BMI high and how can I reduce it? What is my blood pressure and is it normal for me? What should I eat to help my blood sugar?")
 
     if uploaded_reports:
         st.markdown("**Uploaded Report Summary**")
