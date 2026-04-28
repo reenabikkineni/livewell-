@@ -2332,7 +2332,6 @@ st.sidebar.markdown(
     <div class="info-card" style="margin-top:0.75rem;padding:0.9rem 1rem;">
         <div class="small-note" style="margin-bottom:0.25rem;">Your profile</div>
         <div style="font-weight:800;font-size:1.05rem;">{patient_name}</div>
-        <div class="small-note" style="margin-top:0.35rem;">Light theme is the default for clearer projected presentation.</div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -2397,7 +2396,6 @@ def render_home():
     overall_tone = tone_from_score(overall_score)
     blood_pressure_tone = tone_from_bp(latest_values)
     highest_risk_tone = tone_from_risk(highest_probability)
-    intro_steps = build_intro_steps()
     doctor_questions = build_questions_for_doctor(latest_values, disease_probabilities, patient_conditions)
     action_cards = build_action_cards(next_steps, doctor_questions, risk_reasons)
 
@@ -2426,20 +2424,6 @@ def render_home():
     if missing_measure_labels:
         missing_text = ", ".join(missing_measure_labels)
         st.info(f"Some scores are based on partial data because this patient does not have recent values for: {missing_text}.")
-
-    st.subheader("Quick Walkthrough")
-    intro_columns = st.columns(3)
-    for column, step in zip(intro_columns, intro_steps):
-        with column:
-            st.markdown(
-                f"""
-                <div class="info-card">
-                    <div class="info-title">{step['title']}</div>
-                    <div>{step['body']}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
 
     intro_col, guide_col = st.columns([1.15, 0.85])
     with intro_col:
@@ -2831,19 +2815,6 @@ def render_reports():
 
     st.write("**Preview**")
     st.markdown(report_preview_html(report_text), unsafe_allow_html=True)
-
-    method_items = "".join(f"<li>{line}</li>" for line in model_method_lines[:3])
-    reliability_items = "".join(f"<li>{line}</li>" for line in reliability_lines)
-    st.markdown(
-        f"""
-        <div class="info-card" style="margin-top:1rem;">
-            <div class="info-title">How to explain this report</div>
-            <ul class="info-list">{method_items}</ul>
-            <ul class="info-list">{reliability_items}</ul>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
     if uploaded_reports:
         st.write("**Uploaded Hospital-Style Files**")
