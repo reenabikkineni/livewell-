@@ -1721,6 +1721,33 @@ def classify_measure_status(label: str, value: float | None) -> tuple[str, str, 
     )
 
 
+def build_measure_follow_up_question(measure_label: str, latest_values: dict, disease_probabilities: dict) -> str:
+    if measure_label == "BMI":
+        return "Would weight, food, activity, or sleep changes make a meaningful difference for my results?"
+    if measure_label == "Blood sugar":
+        return "Do my blood sugar results suggest I need repeat testing or an HbA1c test?"
+    if measure_label == "Creatinine":
+        return "Should I repeat kidney function testing based on my recent creatinine result?"
+    if measure_label == "Systolic blood pressure":
+        return "Is my blood pressure high enough that I should start checking it regularly at home?"
+
+    highest_disease = max(disease_probabilities, key=disease_probabilities.get)
+    return f"What does my {pretty_disease_name(highest_disease).lower()} risk result mean for my next check-up?"
+
+
+def detect_measure_label(normalized_text: str) -> str | None:
+    personal_measure_map = {
+        "BMI": ["my bmi", "my body mass index", "bmi", "body mass index"],
+        "Blood sugar": ["my blood sugar", "my glucose", "blood sugar", "glucose"],
+        "Creatinine": ["my creatinine", "creatinine"],
+        "Systolic blood pressure": ["my blood pressure", "systolic blood pressure", "blood pressure"],
+    }
+    for measure_label, keywords in personal_measure_map.items():
+        if any(keyword in normalized_text for keyword in keywords):
+            return measure_label
+    return None
+
+
 def build_personal_measure_help(
     measure_label: str,
     latest_values: dict,
@@ -1729,7 +1756,7 @@ def build_personal_measure_help(
 ) -> str:
     value = latest_values.get(measure_label)
     status_label, meaning_text, care_tips = classify_measure_status(measure_label, value)
-    doctor_questions = build_questions_for_doctor(latest_values, disease_probabilities, patient_conditions)
+    follow_up_question = build_measure_follow_up_question(measure_label, latest_values, disease_probabilities)
 
     intro_line = f"Your latest {measure_label.lower()} is not available in this record."
     if value is not None:
@@ -1755,7 +1782,7 @@ def build_personal_measure_help(
         *[f"- {tip}" for tip in care_tips],
         "",
         "Helpful question for your next visit",
-        f"- {doctor_questions[0] if doctor_questions else f'How should I interpret my {measure_label.lower()} in the context of my full record?'}",
+        f"- {follow_up_question}",
     ]
 
     return "\n".join(lines)
@@ -2039,50 +2066,6 @@ def build_reliability_lines(missing_measure_labels: list[str], uploaded_reports:
     return reliability_lines
 
 
-def build_prediction_input_table(
-    patient_row: pd.Series,
-    latest_values: dict,
-    patient_features: pd.DataFrame,
-    uploaded_reports: list[dict] | None = None,
-) -> pd.DataFrame:
-    uploaded_values = combine_uploaded_report_values(uploaded_reports)
-    age_value = CURRENT_YEAR - pd.to_datetime(patient_row["BIRTHDATE"]).year if pd.notna(patient_row["BIRTHDATE"]) else None
-    sex_value = patient_row["GENDER"].title() if pd.notna(patient_row["GENDER"]) else "Not available"
-
-    rows = [
-        {"Input used": "Age", "Value used": age_value if age_value is not None else "Not available", "Source": "Patient record"},
-        {"Input used": "Sex", "Value used": sex_value, "Source": "Patient record"},
-    ]
-
-    feature_row = patient_features.iloc[0] if not patient_features.empty else pd.Series(dtype="object")
-    measure_map = [
-        ("Blood sugar", "glucose_missing", "{:.1f}"),
-        ("BMI", "bmi_missing", "{:.1f}"),
-        ("Creatinine", "creatinine_missing", "{:.2f}"),
-        ("Systolic blood pressure", "systolic_bp_missing", "{:.0f} mmHg"),
-    ]
-
-    for label, missing_column, template in measure_map:
-        value = latest_values.get(label)
-        is_missing = float(feature_row.get(missing_column, 0.0)) >= 0.5 if not patient_features.empty else value is None
-
-        if label in uploaded_values:
-            source = "Uploaded file"
-        elif is_missing or value is None:
-            source = "Missing in record; model fallback used"
-        else:
-            source = "Patient record"
-
-        if value is None:
-            value_text = "Not available"
-        else:
-            value_text = template.format(float(value))
-
-        rows.append({"Input used": label, "Value used": value_text, "Source": source})
-
-    return pd.DataFrame(rows)
-
-
 def build_action_cards(next_steps: list[str], questions: list[str], risk_reasons: list[str]) -> list[dict]:
     return [
         {
@@ -2156,9 +2139,6 @@ def build_selected_patient_context(
         "first_name": patient_row["FIRST"] if pd.notna(patient_row["FIRST"]) else "Patient",
         "uploaded_report_active": bool(combine_uploaded_report_values(uploaded_reports)),
         "missing_measure_labels": missing_measure_labels,
-        "prediction_input_table": build_prediction_input_table(patient_row, latest_values, patient_features, uploaded_reports),
-        "model_method_lines": build_model_method_lines(),
-        "reliability_lines": build_reliability_lines(missing_measure_labels, uploaded_reports),
     }
 
 
@@ -2184,6 +2164,28 @@ def generate_patient_help_response(
     if not normalized_text:
         return "Type a question like 'What does creatinine mean?', 'What should I ask my doctor?', or 'I have headache and dizziness'."
 
+    measure_label = detect_measure_label(normalized_text)
+    symptom_keywords = [
+        "pain", "headache", "dizziness", "dizzy", "tired", "fatigue", "swelling",
+        "thirst", "thirsty", "urinating", "pee", "breathing", "cough", "fever",
+        "nausea", "vomit", "weakness", "chest", "symptom",
+    ]
+    symptom_like = any(keyword in normalized_text for keyword in symptom_keywords)
+    explicit_measure_phrases = [
+        "what is my",
+        "what does my",
+        "explain my",
+        "is my",
+        "how does my",
+        "how can i take care",
+        "affect me",
+        "normal for me",
+        "normal for my situation",
+    ]
+    explicit_measure_intent = measure_label is not None and any(
+        phrase in normalized_text for phrase in explicit_measure_phrases
+    )
+
     if "ask my doctor" in normalized_text or "questions for my doctor" in normalized_text:
         questions = build_questions_for_doctor(latest_values, disease_probabilities, patient_conditions)
         return "\n".join(
@@ -2202,30 +2204,8 @@ def generate_patient_help_response(
     if "trend" in normalized_text or "changed over time" in normalized_text or "over time" in normalized_text:
         return build_trend_help(latest_values)
 
-    personal_measure_map = {
-        "BMI": ["my bmi", "my body mass index", "bmi", "body mass index"],
-        "Blood sugar": ["my blood sugar", "my glucose", "blood sugar", "glucose"],
-        "Creatinine": ["my creatinine", "creatinine"],
-        "Systolic blood pressure": ["my blood pressure", "systolic blood pressure", "blood pressure"],
-    }
-    personal_question_markers = [
-        "my",
-        "for me",
-        "affect me",
-        "effects me",
-        "take care",
-        "what is",
-        "how is",
-        "how does",
-    ]
-    if any(marker in normalized_text for marker in personal_question_markers):
-        for measure_label, keywords in personal_measure_map.items():
-            if any(keyword in normalized_text for keyword in keywords):
-                return build_personal_measure_help(measure_label, latest_values, disease_probabilities, patient_conditions)
-
-    for measure_label, keywords in personal_measure_map.items():
-        if any(keyword in normalized_text for keyword in keywords):
-            return build_personal_measure_help(measure_label, latest_values, disease_probabilities, patient_conditions)
+    if explicit_measure_intent:
+        return build_personal_measure_help(measure_label, latest_values, disease_probabilities, patient_conditions)
 
     if "health update" in normalized_text or "health updates" in normalized_text or "update me on my health" in normalized_text:
         return build_personal_health_update(latest_values, disease_probabilities, patient_conditions)
@@ -2242,18 +2222,14 @@ def generate_patient_help_response(
             known_term_match = known_term
             break
 
-    symptom_keywords = [
-        "pain", "headache", "dizziness", "dizzy", "tired", "fatigue", "swelling",
-        "thirst", "thirsty", "urinating", "pee", "breathing", "cough", "fever",
-        "nausea", "vomit", "weakness", "chest", "symptom",
-    ]
-    symptom_like = any(keyword in normalized_text for keyword in symptom_keywords)
-
     if known_term_match and ("what is" in normalized_text or "what does" in normalized_text or "mean" in normalized_text or len(normalized_text.split()) <= 4):
         return explain_medical_term(known_term_match)
 
     if symptom_like:
         return build_symptom_helper(user_text)
+
+    if measure_label is not None and ("my" in normalized_text or "for me" in normalized_text):
+        return build_personal_measure_help(measure_label, latest_values, disease_probabilities, patient_conditions)
 
     if known_term_match:
         return explain_medical_term(known_term_match)
@@ -2413,9 +2389,8 @@ bp_value_text = patient_context["bp_value_text"]
 first_name = patient_context["first_name"]
 uploaded_report_active = patient_context["uploaded_report_active"]
 missing_measure_labels = patient_context["missing_measure_labels"]
-prediction_input_table = patient_context["prediction_input_table"]
-model_method_lines = patient_context["model_method_lines"]
-reliability_lines = patient_context["reliability_lines"]
+model_method_lines = build_model_method_lines()
+reliability_lines = build_reliability_lines(missing_measure_labels, uploaded_reports)
 
 
 def render_home():
