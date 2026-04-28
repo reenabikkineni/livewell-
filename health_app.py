@@ -2405,8 +2405,6 @@ def render_home():
     blood_pressure_tone = tone_from_bp(latest_values)
     highest_risk_tone = tone_from_risk(highest_probability)
     highest_risk_name, highest_risk_probability = highest_risk_condition(disease_probabilities)
-    doctor_questions = build_questions_for_doctor(latest_values, disease_probabilities, patient_conditions)
-    action_cards = build_action_cards(next_steps, doctor_questions, risk_reasons)
 
     st.markdown(
         f"""
@@ -2563,20 +2561,6 @@ def render_home():
             """,
             unsafe_allow_html=True,
         )
-
-    st.subheader("Action Snapshot")
-    action_columns = st.columns(3)
-    for column, card in zip(action_columns, action_cards):
-        with column:
-            st.markdown(
-                f"""
-                <div class="info-card">
-                    <div class="info-title">{card['title']}</div>
-                    <div>{card['body']}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
 
 
 def render_history():
