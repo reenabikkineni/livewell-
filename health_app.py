@@ -6,7 +6,6 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 import xgboost as xgb
-from sklearn.model_selection import train_test_split
 
 
 st.set_page_config(page_title="LiveWell+", page_icon="👤", layout="wide")
@@ -15,6 +14,7 @@ CURRENT_YEAR = 2026
 TARGET_STATE = "California"
 TARGET_PATIENT_COUNT = 10000
 DEFAULT_DEMO_PATIENT_ID = "4f6f3c94-9832-e91e-a5bd-bc482f3b1019"
+CORE_OBSERVATION_REGEX = r"glucose|body mass index|bmi|creatinine|systolic blood pressure"
 APP_DIR = Path(__file__).resolve().parent
 DATA_DIR_CANDIDATES = [
     APP_DIR / "app_data",
@@ -514,14 +514,35 @@ def find_data_file(filename: str) -> Path:
 
 @st.cache_data
 def load_data():
-    patients = pd.read_csv(find_data_file("patients.csv"))
-    conditions = pd.read_csv(find_data_file("conditions.csv"))
-    encounters = pd.read_csv(find_data_file("encounters.csv"))
+    patients = pd.read_csv(
+        find_data_file("patients.csv"),
+        usecols=["Id", "BIRTHDATE", "FIRST", "LAST", "GENDER", "STATE"],
+        dtype={"Id": str, "BIRTHDATE": str, "FIRST": str, "LAST": str, "GENDER": str, "STATE": str},
+    )
+    conditions = pd.read_csv(
+        find_data_file("conditions.csv"),
+        usecols=["START", "PATIENT", "DESCRIPTION"],
+        dtype={"START": str, "PATIENT": str, "DESCRIPTION": str},
+    )
+    encounters = pd.read_csv(
+        find_data_file("encounters.csv"),
+        usecols=["START", "PATIENT", "DESCRIPTION"],
+        dtype={"START": str, "PATIENT": str, "DESCRIPTION": str},
+    )
 
     try:
-        observations = pd.read_csv(find_data_file("observations.csv.gz"), compression="gzip")
+        observations = pd.read_csv(
+            find_data_file("observations.csv.gz"),
+            compression="gzip",
+            usecols=["DATE", "PATIENT", "DESCRIPTION", "VALUE"],
+            dtype={"DATE": str, "PATIENT": str, "DESCRIPTION": str, "VALUE": str},
+        )
     except FileNotFoundError:
-        observations = pd.read_csv(find_data_file("observations.csv"))
+        observations = pd.read_csv(
+            find_data_file("observations.csv"),
+            usecols=["DATE", "PATIENT", "DESCRIPTION", "VALUE"],
+            dtype={"DATE": str, "PATIENT": str, "DESCRIPTION": str, "VALUE": str},
+        )
 
     patients = patients.copy()
     patients = patients[patients["STATE"].fillna("").str.lower() == TARGET_STATE.lower()].copy()
@@ -533,19 +554,17 @@ def load_data():
     patient_observations["DESCRIPTION_LOWER"] = patient_observations["DESCRIPTION"].fillna("").str.lower()
 
     measure_patterns = {
-        "has_glucose": ["glucose"],
-        "has_bmi": ["body mass index", "bmi"],
-        "has_creatinine": ["creatinine"],
-        "has_systolic_bp": ["systolic blood pressure"],
+        "has_glucose": r"glucose",
+        "has_bmi": r"body mass index|bmi",
+        "has_creatinine": r"creatinine",
+        "has_systolic_bp": r"systolic blood pressure",
     }
 
     coverage = pd.DataFrame({"Id": patients["Id"].astype(str)})
-    for column_name, patterns in measure_patterns.items():
+    for column_name, pattern_regex in measure_patterns.items():
         matching_patients = set(
             patient_observations.loc[
-                patient_observations["DESCRIPTION_LOWER"].apply(
-                    lambda text: any(pattern in text for pattern in patterns)
-                ),
+                patient_observations["DESCRIPTION_LOWER"].str.contains(pattern_regex, regex=True, na=False),
                 "PATIENT",
             ].astype(str)
         )
@@ -567,6 +586,10 @@ def load_data():
     selected_patient_ids = set(patients["Id"].astype(str))
 
     observations = observations[observations["PATIENT"].astype(str).isin(selected_patient_ids)].copy()
+    observations["DESCRIPTION_LOWER"] = observations["DESCRIPTION"].fillna("").str.lower()
+    observations = observations[
+        observations["DESCRIPTION_LOWER"].str.contains(CORE_OBSERVATION_REGEX, regex=True, na=False)
+    ].copy()
     conditions = conditions[conditions["PATIENT"].astype(str).isin(selected_patient_ids)].copy()
     encounters = encounters[encounters["PATIENT"].astype(str).isin(selected_patient_ids)].copy()
 
@@ -584,17 +607,16 @@ def build_observation_features(observations: pd.DataFrame) -> pd.DataFrame:
     obs = obs.dropna(subset=[date_col])
 
     measures = {
-        "glucose": ["glucose"],
-        "bmi": ["body mass index", "bmi"],
-        "creatinine": ["creatinine"],
-        "systolic_bp": ["systolic blood pressure"],
+        "glucose": r"glucose",
+        "bmi": r"body mass index|bmi",
+        "creatinine": r"creatinine",
+        "systolic_bp": r"systolic blood pressure",
     }
 
     features = None
-    for feature_name, patterns in measures.items():
-        mask = obs["DESCRIPTION"].fillna("").str.lower().apply(
-            lambda text: any(pattern in text for pattern in patterns)
-        )
+    description_lower = obs["DESCRIPTION"].fillna("").str.lower()
+    for feature_name, pattern_regex in measures.items():
+        mask = description_lower.str.contains(pattern_regex, regex=True, na=False)
         latest_rows = (
             obs.loc[mask, ["PATIENT", "VALUE", date_col]]
             .sort_values(date_col)
@@ -686,30 +708,23 @@ def train_model(features: pd.DataFrame, labels: pd.DataFrame):
             disease_models[disease_name] = None
             continue
 
-        x_train, x_test, y_train, y_test = train_test_split(
-            x_data,
-            y_data,
-            test_size=0.2,
-            random_state=42,
-            stratify=y_data,
-        )
-
-        positive_count = int(y_train.sum())
-        negative_count = int((y_train == 0).sum())
+        positive_count = int(y_data.sum())
+        negative_count = int((y_data == 0).sum())
         scale_pos_weight = negative_count / max(positive_count, 1)
 
         model = xgb.XGBClassifier(
             eval_metric="logloss",
-            n_estimators=120,
-            max_depth=4,
-            learning_rate=0.08,
+            n_estimators=60,
+            max_depth=3,
+            learning_rate=0.1,
             subsample=0.9,
             colsample_bytree=0.9,
             scale_pos_weight=scale_pos_weight,
             random_state=42,
             n_jobs=1,
+            tree_method="hist",
         )
-        model.fit(x_train, y_train)
+        model.fit(x_data, y_data)
         disease_models[disease_name] = model
 
     return disease_models
@@ -758,17 +773,17 @@ def build_latest_values_lookup(observations: pd.DataFrame) -> dict:
     obs["DESCRIPTION_LOWER"] = obs["DESCRIPTION"].fillna("").str.lower()
 
     targets = {
-        "Blood sugar": ["glucose"],
-        "BMI": ["body mass index", "bmi"],
-        "Creatinine": ["creatinine"],
-        "Systolic blood pressure": ["systolic blood pressure"],
+        "Blood sugar": r"glucose",
+        "BMI": r"body mass index|bmi",
+        "Creatinine": r"creatinine",
+        "Systolic blood pressure": r"systolic blood pressure",
     }
 
     latest_lookup: dict[str, dict] = {}
 
-    for label, patterns in targets.items():
+    for label, pattern_regex in targets.items():
         subset = obs[
-            obs["DESCRIPTION_LOWER"].apply(lambda text: any(pattern in text for pattern in patterns))
+            obs["DESCRIPTION_LOWER"].str.contains(pattern_regex, regex=True, na=False)
         ][["PATIENT", "VALUE", date_col]].copy()
 
         if subset.empty:
@@ -793,6 +808,7 @@ def build_observation_history_lookup(observations: pd.DataFrame) -> dict:
     obs[date_col] = pd.to_datetime(obs[date_col], errors="coerce")
     obs["DESCRIPTION_LOWER"] = obs["DESCRIPTION"].fillna("").str.lower()
     obs = obs.dropna(subset=["VALUE", date_col])
+    obs = obs[obs["DESCRIPTION_LOWER"].str.contains(CORE_OBSERVATION_REGEX, regex=True, na=False)].copy()
 
     keep_columns = ["PATIENT", "DESCRIPTION", "DESCRIPTION_LOWER", "VALUE", date_col]
     return {
