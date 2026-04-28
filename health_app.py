@@ -2402,8 +2402,6 @@ def render_home():
         unsafe_allow_html=True,
     )
 
-    st.caption("Scores load from pre-trained models plus simple safety rules, so this view should stay responsive during demos.")
-
     if uploaded_report_active and uploaded_reports:
         st.markdown(
             f"""
