@@ -210,33 +210,42 @@ def apply_theme(theme_name: str) -> None:
             padding: 0.2rem 0 !important;
             border: none !important;
             box-shadow: none !important;
+            user-select: none !important;
         }}
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] > div:first-child {{
             background: #ffffff !important;
             border: 2px solid {accent} !important;
             box-shadow: none !important;
+            border-radius: 999px !important;
         }}
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] > div:first-child > div {{
             background: transparent !important;
         }}
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] input:checked + div {{
-            background: {accent} !important;
+            background: #ffffff !important;
             border-color: {accent} !important;
+            box-shadow: inset 0 0 0 6px {accent} !important;
         }}
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] input:checked + div > div {{
-            background: {accent} !important;
-            transform: scale(1) !important;
+            background: transparent !important;
+            transform: scale(0) !important;
         }}
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"][aria-checked="true"] > div:first-child {{
             background: #ffffff !important;
             border-color: {accent} !important;
+            box-shadow: inset 0 0 0 6px {accent} !important;
         }}
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"][aria-checked="true"] > div:first-child > div {{
-            background: {accent} !important;
-            transform: scale(1) !important;
+            background: transparent !important;
+            transform: scale(0) !important;
         }}
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] p,
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] span {{
+            color: {text} !important;
+        }}
+        [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] p::selection,
+        [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] span::selection {{
+            background: transparent !important;
             color: {text} !important;
         }}
         [data-testid="stFormSubmitButton"] button {{
