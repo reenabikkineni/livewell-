@@ -1357,6 +1357,69 @@ def build_profile_overview_help(
     )
 
 
+def build_personal_values_walkthrough(
+    latest_values: dict,
+    disease_probabilities: dict,
+) -> str:
+    ordered_labels = [
+        "Blood sugar",
+        "BMI",
+        "Creatinine",
+        "Systolic blood pressure",
+    ]
+    lines = ["Your values one by one"]
+
+    for label in ordered_labels:
+        value = latest_values.get(label)
+        status_label, meaning_text, _ = classify_measure_status(label, value)
+        lines.append(f"- {format_measure_value(label, value)}")
+        lines.append(f"  This looks {status_label.lower()} for this record.")
+        lines.append(f"  What it means: {meaning_text}")
+
+    highest_label, highest_probability = highest_risk_condition(disease_probabilities)
+    lines.extend(
+        [
+            "",
+            "Big picture",
+            f"- The strongest record-based signal right now is {highest_label.lower()} at {highest_probability * 100:.1f}%.",
+            "- That does not confirm a diagnosis, but it does show what part of the record needs the most attention.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def build_main_concern_help(
+    latest_values: dict,
+    disease_probabilities: dict,
+    prediction_factor_lines: list[str],
+    care_plan_lines: list[str],
+) -> str:
+    highest_label, highest_probability = highest_risk_condition(disease_probabilities)
+    summary_lines = build_record_summary(latest_values)
+    if highest_probability >= 0.35:
+        concern_line = (
+            f"- The main area standing out is {highest_label.lower()} with a {risk_level(highest_probability).lower()} record-based signal of {highest_probability * 100:.1f}%."
+        )
+    else:
+        concern_line = (
+            f"- There is no severe warning sign in this snapshot, but the app is keeping the closest eye on {highest_label.lower()} at {highest_probability * 100:.1f}%."
+        )
+    lines = [
+        "What matters most in your record right now",
+        concern_line,
+        "",
+        "What is likely driving that",
+        *[f"- {line}" for line in prediction_factor_lines[:4]],
+        "",
+        "The values most connected to that view",
+        *[f"- {line}" for line in summary_lines[:4]],
+        "",
+        "Best next step",
+        f"- {care_plan_lines[0] if care_plan_lines else 'Bring this result to your next doctor visit and ask what should be followed first.'}",
+    ]
+    return "\n".join(lines)
+
+
 def build_personal_report_help(
     latest_values: dict,
     disease_probabilities: dict,
@@ -2347,11 +2410,15 @@ def build_personal_health_update(
     personal_focus = build_personal_focus(latest_values, disease_probabilities)
     doctor_questions = build_questions_for_doctor(latest_values, disease_probabilities, patient_conditions)
     next_steps = build_next_steps(max(disease_probabilities.values()) if disease_probabilities else 0.0, latest_values)
+    record_lines = build_record_summary(latest_values)
 
     return "\n".join(
         [
             "Your health update right now",
             *[f"- {item}" for item in personal_focus],
+            "",
+            "Your current values",
+            *[f"- {line}" for line in record_lines[:4]],
             "",
             "What to focus on next",
             *[f"- {step}" for step in next_steps[:4]],
@@ -2509,9 +2576,15 @@ def build_risk_help(disease_probabilities: dict, latest_values: dict) -> str:
     )
 
 
-def build_next_step_help(disease_probabilities: dict, latest_values: dict) -> str:
+def build_next_step_help(
+    disease_probabilities: dict,
+    latest_values: dict,
+    care_plan_lines: list[str] | None = None,
+) -> str:
     steps = build_next_steps(max(disease_probabilities.values()) if disease_probabilities else 0.0, latest_values)
     personal_focus = build_personal_focus(latest_values, disease_probabilities)
+    care_plan_lines = care_plan_lines or []
+    suggested_steps = care_plan_lines[:4] if care_plan_lines else steps[:5]
     return "\n".join(
         [
             "What you can do next for your own record",
@@ -2521,7 +2594,7 @@ def build_next_step_help(disease_probabilities: dict, latest_values: dict) -> st
             *[f"- {item}" for item in personal_focus],
             "",
             "Suggested next steps",
-            *[f"- {step}" for step in steps[:5]],
+            *[f"- {step}" for step in suggested_steps],
             "",
             "When to contact a doctor sooner",
             "- If symptoms are new, worsening, severe, or worrying, seek medical advice sooner rather than waiting.",
@@ -2750,6 +2823,31 @@ def generate_patient_help_response(
     wants_food_help = any(phrase in normalized_text for phrase in ["what should i eat", "what foods", "what food", "what should i avoid", "avoid", "diet", "meal"])
     wants_full_profile = any(phrase in normalized_text for phrase in ["everything important", "whole profile", "my profile", "full profile", "explain everything"])
     wants_upload_change = any(phrase in normalized_text for phrase in ["what changed", "after upload", "after the upload", "did anything change", "what got better", "what got worse"])
+    wants_values_walkthrough = any(
+        phrase in normalized_text
+        for phrase in [
+            "all my values",
+            "my values one by one",
+            "one by one",
+            "each value",
+            "every value",
+            "all of my values",
+            "explain all my values",
+        ]
+    )
+    wants_main_concern = any(
+        phrase in normalized_text
+        for phrase in [
+            "worry me most",
+            "worries me most",
+            "important right now",
+            "most important right now",
+            "main problem",
+            "main concern",
+            "what matters most",
+            "what should worry me",
+        ]
+    )
     wants_personal_report = (
         "report" in normalized_text
         and any(
@@ -2802,10 +2900,27 @@ def generate_patient_help_response(
         return build_risk_help(disease_probabilities, latest_values)
 
     if "what should i do next" in normalized_text or "what do i do next" in normalized_text or "next step" in normalized_text:
-        return build_next_step_help(disease_probabilities, latest_values)
+        return build_next_step_help(disease_probabilities, latest_values, care_plan_lines)
 
     if wants_upload_change:
         return build_uploaded_change_help(uploaded_change_lines)
+
+    if wants_personal_report:
+        return build_personal_report_help(
+            latest_values,
+            disease_probabilities,
+            patient_conditions,
+            uploaded_change_lines,
+            prediction_factor_lines,
+            care_plan_lines,
+            validation_flags,
+        )
+
+    if wants_values_walkthrough:
+        return build_personal_values_walkthrough(latest_values, disease_probabilities)
+
+    if wants_main_concern:
+        return build_main_concern_help(latest_values, disease_probabilities, prediction_factor_lines, care_plan_lines)
 
     if wants_full_profile:
         return build_profile_overview_help(latest_values, disease_probabilities, prediction_factor_lines, care_plan_lines, validation_flags)
@@ -2828,17 +2943,6 @@ def generate_patient_help_response(
 
     if "my health" in normalized_text or "my record" in normalized_text or "my data" in normalized_text or "summary" in normalized_text:
         return build_personal_health_update(latest_values, disease_probabilities, patient_conditions)
-
-    if wants_personal_report:
-        return build_personal_report_help(
-            latest_values,
-            disease_probabilities,
-            patient_conditions,
-            uploaded_change_lines,
-            prediction_factor_lines,
-            care_plan_lines,
-            validation_flags,
-        )
 
     if condition_label is not None:
         return build_personal_condition_help(condition_label, latest_values, disease_probabilities)
@@ -2866,6 +2970,15 @@ def generate_patient_help_response(
 
     if known_term_match:
         return explain_medical_term(known_term_match)
+
+    if any(token in normalized_text for token in ["my", "me", "for me", "myself"]):
+        return build_profile_overview_help(
+            latest_values,
+            disease_probabilities,
+            prediction_factor_lines,
+            care_plan_lines,
+            validation_flags,
+        )
 
     return "\n".join(
         [
