@@ -225,16 +225,17 @@ def apply_theme(theme_name: str) -> None:
             background: transparent !important;
         }}
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"][aria-checked="true"] > div:first-child {{
-            background: #ffffff !important;
+            background: {accent} !important;
             border-color: {accent} !important;
         }}
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"][aria-checked="true"] > div:first-child > div {{
-            background: {accent} !important;
+            background: #ffffff !important;
+            transform: scale(0.72) !important;
         }}
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"][aria-checked="true"] {{
-            background: {accent_soft} !important;
+            background: #dcecff !important;
             border-color: {accent} !important;
-            box-shadow: 0 8px 18px rgba(22, 119, 210, 0.14) !important;
+            box-shadow: 0 10px 22px rgba(22, 119, 210, 0.18) !important;
         }}
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] p,
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] span {{
