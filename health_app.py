@@ -2135,22 +2135,30 @@ def build_measure_care_lines(measure_label: str, intents: dict[str, bool]) -> li
         if intents["activity"]:
             lines.insert(0, "A realistic starting point is walking most days of the week and slowly increasing the time or intensity.")
         if intents["food"]:
-            lines.insert(0, "Try meals that keep you fuller longer, like protein plus fiber, instead of relying on highly sugary or refined foods.")
+            lines.insert(0, "Try meals that keep you fuller longer, like vegetables, protein, beans, yogurt, eggs, or high-fiber foods instead of highly sugary or refined foods.")
+            lines.insert(1, "Cut back on sugary drinks, pastries, chips, and frequent fast-food meals if those are part of your routine.")
         return lines
 
     if measure_label == "Blood sugar":
-        return [
+        lines = [
             "Regular meals, less sugary drinks, and more routine movement can help keep blood sugar steadier.",
             "A short walk after meals can help some people bring blood sugar down over time.",
             "If this stays high, ask whether repeat glucose or HbA1c testing is needed.",
         ]
+        if intents["food"]:
+            lines.insert(0, "Try choosing more fiber and protein, and cut back on sugary drinks, desserts, white bread, and large refined-carb meals.")
+            lines.insert(1, "Pair carbs with protein when you can, because that can make blood sugar rise less sharply.")
+        return lines
 
     if measure_label == "Systolic blood pressure":
-        return [
+        lines = [
             "Home blood pressure checks, lower salt intake, regular activity, and better sleep can all help.",
             "If stress is a trigger for you, calming routines and consistent sleep may make a difference too.",
             "If readings stay elevated, bring a home log to your doctor visit.",
         ]
+        if intents["food"]:
+            lines.insert(0, "Try reducing very salty packaged foods, instant noodles, chips, and restaurant meals if those are common in your routine.")
+        return lines
 
     if measure_label == "Creatinine":
         return [
@@ -2233,7 +2241,9 @@ def build_personal_measure_help(
     intro_line = format_measure_value(measure_label, value)
     reason_lines = build_measure_reason_lines(measure_label, latest_values)
     action_lines = build_measure_care_lines(measure_label, intents)
-    action_lines.extend([tip for tip in care_tips if tip not in action_lines])
+    for tip in care_tips:
+        if not any(tip.lower() == existing.lower() for existing in action_lines):
+            action_lines.append(tip)
 
     lines = [
         f"About your {measure_label.lower()}",
