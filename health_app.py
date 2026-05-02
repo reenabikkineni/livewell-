@@ -15,6 +15,32 @@ TARGET_STATE = "California"
 TARGET_PATIENT_COUNT = 10000
 DEFAULT_DEMO_PATIENT_ID = "4f6f3c94-9832-e91e-a5bd-bc482f3b1019"
 CORE_OBSERVATION_REGEX = r"glucose|body mass index|bmi|creatinine|systolic blood pressure"
+MEASUREMENT_SPECS = {
+    "Blood sugar": {
+        "feature_name": "glucose",
+        "include": r"glucose",
+        "exclude": r"urine|test strip|csf|cerebrospinal|dialysate",
+        "prefer": r"serum|plasma|blood",
+    },
+    "BMI": {
+        "feature_name": "bmi",
+        "include": r"body mass index|bmi",
+        "exclude": r"",
+        "prefer": r"",
+    },
+    "Creatinine": {
+        "feature_name": "creatinine",
+        "include": r"creatinine",
+        "exclude": r"urine|ratio|clearance|microalbumin|albumin\/creatinine",
+        "prefer": r"serum|plasma|blood",
+    },
+    "Systolic blood pressure": {
+        "feature_name": "systolic_bp",
+        "include": r"systolic blood pressure",
+        "exclude": r"",
+        "prefer": r"",
+    },
+}
 APP_DIR = Path(__file__).resolve().parent
 DATA_DIR_CANDIDATES = [
     APP_DIR / "app_data",
@@ -512,6 +538,28 @@ def find_data_file(filename: str) -> Path:
     raise FileNotFoundError(f"Could not find {filename}. Looked in: {searched_locations}")
 
 
+def build_measure_mask(description_lower: pd.Series, include_regex: str, exclude_regex: str = "") -> pd.Series:
+    include_mask = description_lower.str.contains(include_regex, regex=True, na=False)
+    if not exclude_regex:
+        return include_mask
+    exclude_mask = description_lower.str.contains(exclude_regex, regex=True, na=False)
+    return include_mask & ~exclude_mask
+
+
+def assign_measure_label(description_lower: pd.Series) -> pd.Series:
+    measure_label = pd.Series(pd.NA, index=description_lower.index, dtype="object")
+    for label, spec in MEASUREMENT_SPECS.items():
+        mask = build_measure_mask(description_lower, spec["include"], spec["exclude"])
+        measure_label = measure_label.mask(mask, label)
+    return measure_label
+
+
+def build_measure_priority(description_lower: pd.Series, prefer_regex: str = "") -> pd.Series:
+    if not prefer_regex:
+        return pd.Series(0, index=description_lower.index, dtype="int64")
+    return description_lower.str.contains(prefer_regex, regex=True, na=False).astype(int)
+
+
 @st.cache_data
 def load_data():
     patients = pd.read_csv(
@@ -554,17 +602,21 @@ def load_data():
     patient_observations["DESCRIPTION_LOWER"] = patient_observations["DESCRIPTION"].fillna("").str.lower()
 
     measure_patterns = {
-        "has_glucose": r"glucose",
-        "has_bmi": r"body mass index|bmi",
-        "has_creatinine": r"creatinine",
-        "has_systolic_bp": r"systolic blood pressure",
+        "has_glucose": MEASUREMENT_SPECS["Blood sugar"],
+        "has_bmi": MEASUREMENT_SPECS["BMI"],
+        "has_creatinine": MEASUREMENT_SPECS["Creatinine"],
+        "has_systolic_bp": MEASUREMENT_SPECS["Systolic blood pressure"],
     }
 
     coverage = pd.DataFrame({"Id": patients["Id"].astype(str)})
-    for column_name, pattern_regex in measure_patterns.items():
+    for column_name, spec in measure_patterns.items():
         matching_patients = set(
             patient_observations.loc[
-                patient_observations["DESCRIPTION_LOWER"].str.contains(pattern_regex, regex=True, na=False),
+                build_measure_mask(
+                    patient_observations["DESCRIPTION_LOWER"],
+                    spec["include"],
+                    spec["exclude"],
+                ),
                 "PATIENT",
             ].astype(str)
         )
@@ -606,20 +658,15 @@ def build_observation_features(observations: pd.DataFrame) -> pd.DataFrame:
     obs[date_col] = pd.to_datetime(obs[date_col], errors="coerce")
     obs = obs.dropna(subset=[date_col])
 
-    measures = {
-        "glucose": r"glucose",
-        "bmi": r"body mass index|bmi",
-        "creatinine": r"creatinine",
-        "systolic_bp": r"systolic blood pressure",
-    }
-
     features = None
     description_lower = obs["DESCRIPTION"].fillna("").str.lower()
-    for feature_name, pattern_regex in measures.items():
-        mask = description_lower.str.contains(pattern_regex, regex=True, na=False)
+    for spec in MEASUREMENT_SPECS.values():
+        feature_name = spec["feature_name"]
+        mask = build_measure_mask(description_lower, spec["include"], spec["exclude"])
+        priority = build_measure_priority(description_lower, spec["prefer"])
         latest_rows = (
-            obs.loc[mask, ["PATIENT", "VALUE", date_col]]
-            .sort_values(date_col)
+            obs.loc[mask, ["PATIENT", "VALUE", date_col]].assign(_priority=priority[mask].to_numpy())
+            .sort_values([date_col, "_priority"])
             .drop_duplicates("PATIENT", keep="last")
             .rename(columns={"VALUE": feature_name})
         )
@@ -752,24 +799,21 @@ def build_latest_values_lookup(observations: pd.DataFrame) -> dict:
     obs = obs.dropna(subset=[date_col])
     obs["DESCRIPTION_LOWER"] = obs["DESCRIPTION"].fillna("").str.lower()
 
-    targets = {
-        "Blood sugar": r"glucose",
-        "BMI": r"body mass index|bmi",
-        "Creatinine": r"creatinine",
-        "Systolic blood pressure": r"systolic blood pressure",
-    }
-
     latest_lookup: dict[str, dict] = {}
 
-    for label, pattern_regex in targets.items():
+    description_lower = obs["DESCRIPTION_LOWER"]
+    for label, spec in MEASUREMENT_SPECS.items():
+        mask = build_measure_mask(description_lower, spec["include"], spec["exclude"])
+        priority = build_measure_priority(description_lower, spec["prefer"])
         subset = obs[
-            obs["DESCRIPTION_LOWER"].str.contains(pattern_regex, regex=True, na=False)
+            mask
         ][["PATIENT", "VALUE", date_col]].copy()
 
         if subset.empty:
             continue
 
-        subset = subset.sort_values(date_col).drop_duplicates("PATIENT", keep="last")
+        subset["_priority"] = priority[mask].to_numpy()
+        subset = subset.sort_values([date_col, "_priority"]).drop_duplicates("PATIENT", keep="last")
         for _, row in subset.iterrows():
             patient_id = row["PATIENT"]
             if patient_id not in latest_lookup:
@@ -788,9 +832,10 @@ def build_observation_history_lookup(observations: pd.DataFrame) -> dict:
     obs[date_col] = pd.to_datetime(obs[date_col], errors="coerce")
     obs["DESCRIPTION_LOWER"] = obs["DESCRIPTION"].fillna("").str.lower()
     obs = obs.dropna(subset=["VALUE", date_col])
-    obs = obs[obs["DESCRIPTION_LOWER"].str.contains(CORE_OBSERVATION_REGEX, regex=True, na=False)].copy()
+    obs["MEASURE_LABEL"] = assign_measure_label(obs["DESCRIPTION_LOWER"])
+    obs = obs.dropna(subset=["MEASURE_LABEL"]).copy()
 
-    keep_columns = ["PATIENT", "DESCRIPTION", "DESCRIPTION_LOWER", "VALUE", date_col]
+    keep_columns = ["PATIENT", "DESCRIPTION", "DESCRIPTION_LOWER", "MEASURE_LABEL", "VALUE", date_col]
     return {
         str(patient_id): group[keep_columns].copy()
         for patient_id, group in obs.groupby("PATIENT", sort=False)
@@ -2827,36 +2872,24 @@ def render_health_check():
 
     st.markdown('<div class="section-shell">', unsafe_allow_html=True)
     st.subheader("Health Trend")
-    trend_options = {
-        "Blood sugar": ["glucose"],
-        "BMI": ["body mass index", "bmi"],
-        "Creatinine": ["creatinine"],
-        "Systolic blood pressure": ["systolic blood pressure"],
-    }
+    trend_options = list(MEASUREMENT_SPECS.keys())
     combined_uploaded_values = combine_uploaded_report_values(uploaded_reports)
     trend_df = observation_history_lookup.get(str(patient_id), pd.DataFrame()).copy()
     date_column = "DATE" if "DATE" in trend_df.columns else "START"
 
     available_trends = []
-    for label, patterns in trend_options.items():
+    for label in trend_options:
         has_points = False
-        if not trend_df.empty:
-            has_points = trend_df["DESCRIPTION_LOWER"].apply(
-                lambda text: any(pattern in text for pattern in patterns)
-            ).any()
+        if not trend_df.empty and "MEASURE_LABEL" in trend_df.columns:
+            has_points = trend_df["MEASURE_LABEL"].eq(label).any()
         if has_points or label in combined_uploaded_values:
             available_trends.append(label)
 
-    trend_labels = available_trends if available_trends else list(trend_options.keys())
+    trend_labels = available_trends if available_trends else trend_options
     selected_trend = st.selectbox("Choose a measure", trend_labels)
-    trend_patterns = trend_options[selected_trend]
 
-    if not trend_df.empty:
-        trend_df = trend_df[
-            trend_df["DESCRIPTION_LOWER"].apply(
-                lambda text: any(pattern in text for pattern in trend_patterns)
-            )
-        ].sort_values(date_column)
+    if not trend_df.empty and "MEASURE_LABEL" in trend_df.columns:
+        trend_df = trend_df[trend_df["MEASURE_LABEL"] == selected_trend].sort_values(date_column)
 
     if selected_trend in combined_uploaded_values:
         latest_uploaded_at = None
