@@ -1175,6 +1175,186 @@ def build_uploaded_reports_summary(uploaded_reports: list[dict] | None) -> str:
     return "\n".join(lines)
 
 
+def measure_unit(label: str) -> str:
+    return {
+        "Blood sugar": "",
+        "BMI": "",
+        "Creatinine": "",
+        "Systolic blood pressure": " mmHg",
+    }.get(label, "")
+
+
+def format_measure_number(label: str, value: float) -> str:
+    if label == "Systolic blood pressure":
+        return f"{value:.0f}{measure_unit(label)}"
+    if label == "Creatinine":
+        return f"{value:.2f}{measure_unit(label)}"
+    return f"{value:.1f}{measure_unit(label)}"
+
+
+def build_value_validation_flags(latest_values: dict) -> list[str]:
+    flags = []
+    bounds = {
+        "Blood sugar": (40, 450),
+        "BMI": (10, 80),
+        "Creatinine": (0.2, 15),
+        "Systolic blood pressure": (70, 260),
+    }
+    for label, value in latest_values.items():
+        if value is None or label not in bounds:
+            continue
+        lower, upper = bounds[label]
+        if value < lower or value > upper:
+            flags.append(f"{label} looks outside the usual expected range for this app and should be double-checked.")
+    return flags
+
+
+def build_uploaded_change_lines(base_values: dict, current_values: dict, uploaded_reports: list[dict] | None) -> list[str]:
+    if not uploaded_reports:
+        return []
+
+    lines = []
+    for label in MEASUREMENT_SPECS:
+        base_value = base_values.get(label)
+        current_value = current_values.get(label)
+        if current_value is None:
+            continue
+        if base_value is None:
+            lines.append(f"{label} was added from an uploaded file and is now {format_measure_number(label, current_value)}.")
+            continue
+        if abs(current_value - base_value) < 1e-9:
+            continue
+
+        direction = "increased" if current_value > base_value else "decreased"
+        lines.append(
+            f"{label} {direction} from {format_measure_number(label, base_value)} to {format_measure_number(label, current_value)} after the upload."
+        )
+
+    if not lines:
+        lines.append("Uploaded files matched this patient, but they did not change any of the active dashboard values.")
+    return lines
+
+
+def build_prediction_factor_lines(latest_values: dict, disease_probabilities: dict, patient_conditions: pd.DataFrame) -> list[str]:
+    factors = []
+    highest_disease, highest_probability = highest_risk_condition(disease_probabilities)
+
+    if highest_probability > 0:
+        factors.append(f"The strongest current signal is for {highest_disease.lower()} at {highest_probability * 100:.1f}%.")
+
+    systolic_bp = latest_values.get("Systolic blood pressure")
+    blood_sugar = latest_values.get("Blood sugar")
+    creatinine = latest_values.get("Creatinine")
+    bmi = latest_values.get("BMI")
+
+    if blood_sugar is not None and blood_sugar >= 126:
+        factors.append(f"Blood sugar is clearly above target at {format_measure_number('Blood sugar', blood_sugar)}.")
+    elif blood_sugar is not None and blood_sugar >= 100:
+        factors.append(f"Blood sugar is mildly above target at {format_measure_number('Blood sugar', blood_sugar)}.")
+
+    if creatinine is not None and creatinine > 1.3:
+        factors.append(f"Creatinine is elevated at {format_measure_number('Creatinine', creatinine)}, which pushes kidney review higher.")
+
+    if systolic_bp is not None and systolic_bp >= 140:
+        factors.append(f"Systolic blood pressure is high at {format_measure_number('Systolic blood pressure', systolic_bp)}.")
+    elif systolic_bp is not None and systolic_bp >= 120:
+        factors.append(f"Systolic blood pressure is above ideal at {format_measure_number('Systolic blood pressure', systolic_bp)}.")
+
+    if bmi is not None and bmi >= 30:
+        factors.append(f"BMI is in a higher range at {format_measure_number('BMI', bmi)}, which can affect blood sugar and heart risk.")
+    elif bmi is not None and bmi >= 25:
+        factors.append(f"BMI is above the recommended range at {format_measure_number('BMI', bmi)}.")
+
+    useful_conditions = select_clinically_useful_conditions(patient_conditions)
+    if not useful_conditions.empty:
+        factors.append("Past condition history is also being considered in the current record review.")
+
+    if not factors:
+        factors.append("No single strong abnormal factor is standing out in the current record snapshot.")
+    return factors[:6]
+
+
+def build_care_plan_lines(
+    latest_values: dict,
+    disease_probabilities: dict,
+    patient_conditions: pd.DataFrame,
+    uploaded_change_lines: list[str] | None = None,
+) -> list[str]:
+    plan = []
+    if uploaded_change_lines:
+        first_change = uploaded_change_lines[0]
+        if "increased" in first_change or "decreased" in first_change or "added" in first_change:
+            plan.append(first_change)
+
+    plan.extend(build_next_steps(max(disease_probabilities.values()) if disease_probabilities else 0.0, latest_values))
+
+    doctor_questions = build_questions_for_doctor(latest_values, disease_probabilities, patient_conditions)
+    if doctor_questions:
+        plan.append(f"Bring this question to your next visit: {doctor_questions[0]}")
+
+    if not plan:
+        plan.append("Keep following routine preventive care and keep watching future trends.")
+    return plan[:5]
+
+
+def build_trend_insight(selected_trend: str, trend_df: pd.DataFrame) -> str:
+    if trend_df.empty or "VALUE" not in trend_df.columns or len(trend_df) < 2:
+        return f"There is not enough repeat {selected_trend.lower()} data yet to say whether it is improving or worsening."
+
+    recent_values = trend_df["VALUE"].astype(float).tail(3).tolist()
+    latest_value = recent_values[-1]
+    earlier_value = recent_values[0]
+    change = latest_value - earlier_value
+
+    if abs(change) < 1e-9:
+        return f"Your recent {selected_trend.lower()} readings look stable over the available trend points."
+
+    direction = "up" if change > 0 else "down"
+    magnitude = abs(change)
+    return (
+        f"Your recent {selected_trend.lower()} trend is moving {direction} by about "
+        f"{format_measure_number(selected_trend, magnitude)} across the latest points."
+    )
+
+
+def build_uploaded_change_help(uploaded_change_lines: list[str]) -> str:
+    if not uploaded_change_lines:
+        return "No uploaded file changes are active right now, so the dashboard is still using the original record values."
+    return "\n".join(
+        [
+            "What changed after your upload",
+            *[f"- {line}" for line in uploaded_change_lines],
+        ]
+    )
+
+
+def build_profile_overview_help(
+    latest_values: dict,
+    disease_probabilities: dict,
+    prediction_factor_lines: list[str],
+    care_plan_lines: list[str],
+    validation_flags: list[str],
+) -> str:
+    summary_lines = build_record_summary(latest_values)
+    highest_label, highest_probability = highest_risk_condition(disease_probabilities)
+    return "\n".join(
+        [
+            "Most important things in your profile right now",
+            f"- The main area to review is {highest_label.lower()} at {highest_probability * 100:.1f}%.",
+            *[f"- {line}" for line in summary_lines[:4]],
+            "",
+            "What is driving that view",
+            *[f"- {line}" for line in prediction_factor_lines[:4]],
+            "",
+            "What to do next",
+            *[f"- {line}" for line in care_plan_lines[:3]],
+            "",
+            "Data quality note",
+            f"- {validation_flags[0] if validation_flags else 'The current values passed the app’s basic range checks.'}",
+        ]
+    )
+
+
 def risk_level(probability: float) -> str:
     if probability >= 0.6:
         return "High"
@@ -1544,6 +1724,9 @@ def build_report_text(
     disease_probabilities: dict,
     reasons: list[str],
     next_steps: list[str],
+    uploaded_change_lines: list[str],
+    prediction_factor_lines: list[str],
+    validation_flags: list[str],
     patient_conditions: pd.DataFrame,
     patient_encounters: pd.DataFrame,
 ) -> str:
@@ -1575,6 +1758,28 @@ def build_report_text(
     lines.append("Key flagged findings:")
     for item in clinical_flags:
         lines.append(f"- {item}")
+
+    if uploaded_change_lines:
+        lines.append("")
+        lines.append("What changed after uploaded files:")
+        for item in uploaded_change_lines:
+            lines.append(f"- {item}")
+
+    lines.append("")
+    lines.append("Main factors driving the current view:")
+    for item in prediction_factor_lines[:5]:
+        lines.append(f"- {item}")
+
+    lines.append("")
+    lines.append("Practical next steps:")
+    for item in next_steps[:5]:
+        lines.append(f"- {item}")
+
+    if validation_flags:
+        lines.append("")
+        lines.append("Data quality checks:")
+        for item in validation_flags:
+            lines.append(f"- {item}")
 
     lines.append("")
     lines.append("Clinically useful history to share:")
@@ -1807,7 +2012,7 @@ def build_measure_follow_up_question(measure_label: str, latest_values: dict, di
 def detect_measure_label(normalized_text: str) -> str | None:
     personal_measure_map = {
         "BMI": ["my bmi", "my body mass index", "bmi", "body mass index"],
-        "Blood sugar": ["my blood sugar", "my glucose", "blood sugar", "glucose"],
+        "Blood sugar": ["my blood sugar", "my glucose", "my sugar", "blood sugar", "glucose", "sugar"],
         "Creatinine": ["my creatinine", "creatinine"],
         "Systolic blood pressure": ["my blood pressure", "systolic blood pressure", "blood pressure"],
     }
@@ -1815,6 +2020,24 @@ def detect_measure_label(normalized_text: str) -> str | None:
         if any(keyword in normalized_text for keyword in keywords):
             return measure_label
     return None
+
+
+def choose_food_focus_measure(latest_values: dict, disease_probabilities: dict) -> str:
+    if latest_values.get("Blood sugar", 0) >= 100:
+        return "Blood sugar"
+    if latest_values.get("BMI", 0) >= 25:
+        return "BMI"
+    if latest_values.get("Systolic blood pressure", 0) >= 120:
+        return "Systolic blood pressure"
+    if latest_values.get("Creatinine", 0) > 1.3:
+        return "Creatinine"
+
+    highest_disease = max(disease_probabilities, key=disease_probabilities.get)
+    if highest_disease == "kidney_disease":
+        return "Creatinine"
+    if highest_disease == "hypertension":
+        return "Systolic blood pressure"
+    return "Blood sugar"
 
 
 def detect_condition_label(normalized_text: str) -> str | None:
@@ -2355,7 +2578,8 @@ def build_selected_patient_context(
     patient_features = features_df.loc[features_df["Id"] == patient_id].drop(columns=["Id"])
     patient_features = apply_uploaded_values_to_features(patient_features, uploaded_reports)
     model_probabilities = get_disease_probabilities(models, patient_features)
-    latest_values = latest_values_lookup.get(str(patient_id), {}).copy()
+    baseline_latest_values = latest_values_lookup.get(str(patient_id), {}).copy()
+    latest_values = baseline_latest_values.copy()
     latest_values.update(combine_uploaded_report_values(uploaded_reports))
     disease_probabilities = build_record_based_disease_scores(
         latest_values,
@@ -2364,6 +2588,10 @@ def build_selected_patient_context(
         patient_row,
         patient_features,
     )
+    uploaded_change_lines = build_uploaded_change_lines(baseline_latest_values, latest_values, uploaded_reports)
+    prediction_factor_lines = build_prediction_factor_lines(latest_values, disease_probabilities, patient_conditions)
+    validation_flags = build_value_validation_flags(latest_values)
+    care_plan_lines = build_care_plan_lines(latest_values, disease_probabilities, patient_conditions, uploaded_change_lines)
     highest_probability = max(disease_probabilities.values()) if disease_probabilities else 0.0
     systolic_value = latest_values.get("Systolic blood pressure")
     missing_measure_map = {
@@ -2384,9 +2612,14 @@ def build_selected_patient_context(
         "diabetes_probability": disease_probabilities.get("diabetes", 0.0),
         "highest_probability": highest_probability,
         "latest_values": latest_values,
+        "baseline_latest_values": baseline_latest_values,
         "summary_lines": build_record_summary(latest_values),
         "next_steps": build_next_steps(highest_probability, latest_values),
         "risk_reasons": build_risk_reasons(patient_row, latest_values, highest_probability),
+        "uploaded_change_lines": uploaded_change_lines,
+        "prediction_factor_lines": prediction_factor_lines,
+        "validation_flags": validation_flags,
+        "care_plan_lines": care_plan_lines,
         "patient_conditions": patient_conditions,
         "patient_encounters": patient_encounters,
         "overall_score": calculate_overall_health_score(disease_probabilities),
@@ -2418,6 +2651,10 @@ def generate_patient_help_response(
     latest_values: dict,
     disease_probabilities: dict,
     patient_conditions: pd.DataFrame,
+    uploaded_change_lines: list[str] | None = None,
+    prediction_factor_lines: list[str] | None = None,
+    care_plan_lines: list[str] | None = None,
+    validation_flags: list[str] | None = None,
 ) -> str:
     normalized_text = user_text.strip().lower()
     normalized_text = re.sub(r"\bbp\b", "blood pressure", normalized_text)
@@ -2431,7 +2668,15 @@ def generate_patient_help_response(
         "thirst", "thirsty", "urinating", "pee", "breathing", "cough", "fever",
         "nausea", "vomit", "weakness", "chest", "symptom",
     ]
+    uploaded_change_lines = uploaded_change_lines or []
+    prediction_factor_lines = prediction_factor_lines or []
+    care_plan_lines = care_plan_lines or []
+    validation_flags = validation_flags or []
     symptom_like = any(keyword in normalized_text for keyword in symptom_keywords)
+    wants_weight_help = any(phrase in normalized_text for phrase in ["lose weight", "weight loss", "my weight", "overweight"])
+    wants_food_help = any(phrase in normalized_text for phrase in ["what should i eat", "what foods", "what food", "what should i avoid", "avoid", "diet", "meal"])
+    wants_full_profile = any(phrase in normalized_text for phrase in ["everything important", "whole profile", "my profile", "full profile", "explain everything"])
+    wants_upload_change = any(phrase in normalized_text for phrase in ["what changed", "after upload", "after the upload", "did anything change", "what got better", "what got worse"])
     explicit_measure_phrases = [
         "what is my",
         "what does my",
@@ -2469,6 +2714,19 @@ def generate_patient_help_response(
 
     if "what should i do next" in normalized_text or "what do i do next" in normalized_text or "next step" in normalized_text:
         return build_next_step_help(disease_probabilities, latest_values)
+
+    if wants_upload_change:
+        return build_uploaded_change_help(uploaded_change_lines)
+
+    if wants_full_profile:
+        return build_profile_overview_help(latest_values, disease_probabilities, prediction_factor_lines, care_plan_lines, validation_flags)
+
+    if wants_weight_help:
+        return build_personal_measure_help("BMI", latest_values, disease_probabilities, patient_conditions, user_text)
+
+    if wants_food_help and measure_label is None:
+        focused_measure = choose_food_focus_measure(latest_values, disease_probabilities)
+        return build_personal_measure_help(focused_measure, latest_values, disease_probabilities, patient_conditions, user_text)
 
     if "trend" in normalized_text or "changed over time" in normalized_text or "over time" in normalized_text:
         return build_trend_help(latest_values)
@@ -2673,9 +2931,14 @@ patient_context = st.session_state[context_cache_key]
 disease_probabilities = patient_context["disease_probabilities"]
 highest_probability = patient_context["highest_probability"]
 latest_values = patient_context["latest_values"]
+baseline_latest_values = patient_context["baseline_latest_values"]
 summary_lines = patient_context["summary_lines"]
 next_steps = patient_context["next_steps"]
 risk_reasons = patient_context["risk_reasons"]
+uploaded_change_lines = patient_context["uploaded_change_lines"]
+prediction_factor_lines = patient_context["prediction_factor_lines"]
+validation_flags = patient_context["validation_flags"]
+care_plan_lines = patient_context["care_plan_lines"]
 patient_conditions = patient_context["patient_conditions"]
 patient_encounters = patient_context["patient_encounters"]
 overall_score = patient_context["overall_score"]
@@ -2712,10 +2975,23 @@ def render_home():
             """,
             unsafe_allow_html=True,
         )
+        if uploaded_change_lines:
+            change_items = "".join(f"<li>{line}</li>" for line in uploaded_change_lines[:4])
+            st.markdown(
+                f"""
+                <div class="info-card">
+                    <div class="info-title">What Changed After Upload</div>
+                    <ul class="info-list">{change_items}</ul>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
     if missing_measure_labels:
         missing_text = ", ".join(missing_measure_labels)
         st.info(f"Some scores are based on partial data because this patient does not have recent values for: {missing_text}.")
+    if validation_flags:
+        st.warning(validation_flags[0])
 
     intro_col, guide_col = st.columns([1.15, 0.85])
     with intro_col:
@@ -2847,6 +3123,30 @@ def render_home():
             unsafe_allow_html=True,
         )
 
+    insight_col1, insight_col2 = st.columns(2)
+    with insight_col1:
+        factor_items = "".join(f"<li>{line}</li>" for line in prediction_factor_lines[:5])
+        st.markdown(
+            f"""
+            <div class="info-card">
+                <div class="info-title">Why The App Is Highlighting This</div>
+                <ul class="info-list">{factor_items}</ul>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with insight_col2:
+        care_plan_items = "".join(f"<li>{line}</li>" for line in care_plan_lines[:5])
+        st.markdown(
+            f"""
+            <div class="info-card">
+                <div class="info-title">Simple Care Plan</div>
+                <ul class="info-list">{care_plan_items}</ul>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
 
 def render_history():
     st.markdown('<div class="section-shell">', unsafe_allow_html=True)
@@ -2887,6 +3187,20 @@ def render_health_check():
     st.write("**Why this may need attention:**")
     for reason in risk_reasons:
         st.write(f"- {reason}")
+
+    st.write("**What is driving the current review:**")
+    for reason in prediction_factor_lines:
+        st.write(f"- {reason}")
+
+    if uploaded_change_lines:
+        st.write("**What changed after the latest upload:**")
+        for line in uploaded_change_lines:
+            st.write(f"- {line}")
+
+    if validation_flags:
+        st.write("**Data quality checks:**")
+        for line in validation_flags:
+            st.write(f"- {line}")
 
     st.write("**Simple summary:**")
     bp_value = latest_values.get("Systolic blood pressure", 0)
@@ -2977,6 +3291,7 @@ def render_health_check():
         ax.tick_params(axis="x", rotation=45)
         fig.tight_layout()
         st.pyplot(fig)
+        st.caption(build_trend_insight(selected_trend, recent_trend))
     else:
         st.info(f"No trend chart data was found for {selected_trend.lower()}, even though other latest values may still be available in the record.")
     st.markdown("</div>", unsafe_allow_html=True)
@@ -2985,7 +3300,7 @@ def render_health_check():
     st.subheader("Guidance For The User")
     guide_col1, guide_col2 = st.columns(2)
     with guide_col1:
-        next_step_items = "".join(f"<li>{step}</li>" for step in next_steps[:5])
+        next_step_items = "".join(f"<li>{step}</li>" for step in care_plan_lines[:5])
         st.markdown(
             f"""
             <div class="info-card">
@@ -3044,6 +3359,10 @@ def render_health_check():
             latest_values,
             disease_probabilities,
             patient_conditions,
+            uploaded_change_lines,
+            prediction_factor_lines,
+            care_plan_lines,
+            validation_flags,
         )
 
     if st.session_state.get(smart_help_result_key):
@@ -3069,6 +3388,9 @@ def render_reports():
         disease_probabilities,
         risk_reasons,
         next_steps,
+        uploaded_change_lines,
+        prediction_factor_lines,
+        validation_flags,
         patient_conditions,
         patient_encounters,
     )
