@@ -218,6 +218,8 @@ def apply_theme(theme_name: str) -> None:
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] span {{
             color: {text} !important;
             font-weight: 600 !important;
+            font-size: 1.08rem !important;
+            line-height: 1.55 !important;
         }}
         [data-testid="stFormSubmitButton"] button {{
             background: linear-gradient(135deg, #0f6cbd 0%, #1677d2 100%) !important;
@@ -2642,7 +2644,7 @@ def choose_demo_patient(patients_df: pd.DataFrame) -> pd.Series:
 
 
 def sidebar_circle_label(option: str, selected_option: str) -> str:
-    marker = "●" if option == selected_option else "○"
+    marker = "◉" if option == selected_option else "◯"
     return f"{marker}  {option}"
 
 
