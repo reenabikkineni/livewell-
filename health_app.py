@@ -1357,6 +1357,67 @@ def build_profile_overview_help(
     )
 
 
+def build_personal_report_help(
+    latest_values: dict,
+    disease_probabilities: dict,
+    patient_conditions: pd.DataFrame,
+    uploaded_change_lines: list[str],
+    prediction_factor_lines: list[str],
+    care_plan_lines: list[str],
+    validation_flags: list[str],
+) -> str:
+    record_lines = build_record_summary(latest_values)
+    key_flags = build_clinical_flags(latest_values, disease_probabilities)
+    doctor_questions = build_questions_for_doctor(latest_values, disease_probabilities, patient_conditions)
+    highest_label, highest_probability = highest_risk_condition(disease_probabilities)
+
+    lines = [
+        "Your report in personal terms",
+        f"- The main area this report is watching is {highest_label.lower()} with a {risk_level(highest_probability).lower()} record-based signal of {highest_probability * 100:.1f}%.",
+        "- This does not confirm a diagnosis. It highlights what may deserve more attention in your current record.",
+        "",
+        "Your actual values in this report",
+        *[f"- {line}" for line in record_lines[:4]],
+        "",
+        "What stands out most in your case",
+        *[f"- {line}" for line in key_flags[:4]],
+    ]
+
+    if uploaded_change_lines:
+        lines.extend(
+            [
+                "",
+                "What changed after your latest upload",
+                *[f"- {line}" for line in uploaded_change_lines[:4]],
+            ]
+        )
+
+    if prediction_factor_lines:
+        lines.extend(
+            [
+                "",
+                "Why the app is highlighting these results",
+                *[f"- {line}" for line in prediction_factor_lines[:4]],
+            ]
+        )
+
+    lines.extend(
+        [
+            "",
+            "What to do next",
+            *[f"- {line}" for line in care_plan_lines[:4]],
+            "",
+            "A useful question for your doctor",
+            f"- {doctor_questions[0] if doctor_questions else 'Which of these results matters most for me to follow over time?'}",
+            "",
+            "Data quality note",
+            f'- {validation_flags[0] if validation_flags else "The current values passed the app\'s basic range checks."}',
+        ]
+    )
+
+    return "\n".join(lines)
+
+
 def risk_level(probability: float) -> str:
     if probability >= 0.6:
         return "High"
@@ -2689,6 +2750,22 @@ def generate_patient_help_response(
     wants_food_help = any(phrase in normalized_text for phrase in ["what should i eat", "what foods", "what food", "what should i avoid", "avoid", "diet", "meal"])
     wants_full_profile = any(phrase in normalized_text for phrase in ["everything important", "whole profile", "my profile", "full profile", "explain everything"])
     wants_upload_change = any(phrase in normalized_text for phrase in ["what changed", "after upload", "after the upload", "did anything change", "what got better", "what got worse"])
+    wants_personal_report = (
+        "report" in normalized_text
+        and any(
+            phrase in normalized_text
+            for phrase in [
+                "my report",
+                "explain my report",
+                "report in detail",
+                "report detail",
+                "personal values",
+                "with my values",
+                "with personal values",
+                "explain this report",
+            ]
+        )
+    )
     explicit_measure_phrases = [
         "what is my",
         "what does my",
@@ -2751,6 +2828,17 @@ def generate_patient_help_response(
 
     if "my health" in normalized_text or "my record" in normalized_text or "my data" in normalized_text or "summary" in normalized_text:
         return build_personal_health_update(latest_values, disease_probabilities, patient_conditions)
+
+    if wants_personal_report:
+        return build_personal_report_help(
+            latest_values,
+            disease_probabilities,
+            patient_conditions,
+            uploaded_change_lines,
+            prediction_factor_lines,
+            care_plan_lines,
+            validation_flags,
+        )
 
     if condition_label is not None:
         return build_personal_condition_help(condition_label, latest_values, disease_probabilities)
