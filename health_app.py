@@ -207,7 +207,14 @@ def apply_theme(theme_name: str) -> None:
         }}
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] {{
             background: transparent !important;
-            padding: 0.15rem 0 !important;
+            padding: 0.35rem 0.55rem !important;
+            border-radius: 14px !important;
+            border: 1px solid transparent !important;
+            transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease !important;
+        }}
+        [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"]:hover {{
+            background: {accent_soft} !important;
+            border-color: {border} !important;
         }}
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] > div:first-child {{
             background: #ffffff !important;
@@ -224,9 +231,19 @@ def apply_theme(theme_name: str) -> None:
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"][aria-checked="true"] > div:first-child > div {{
             background: {accent} !important;
         }}
+        [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"][aria-checked="true"] {{
+            background: {accent_soft} !important;
+            border-color: {accent} !important;
+            box-shadow: 0 8px 18px rgba(22, 119, 210, 0.14) !important;
+        }}
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] p,
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] span {{
             color: {text} !important;
+        }}
+        [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"][aria-checked="true"] p,
+        [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"][aria-checked="true"] span {{
+            color: {accent} !important;
+            font-weight: 700 !important;
         }}
         [data-testid="stFormSubmitButton"] button {{
             background: linear-gradient(135deg, #0f6cbd 0%, #1677d2 100%) !important;
