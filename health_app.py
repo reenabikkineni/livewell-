@@ -224,6 +224,19 @@ def apply_theme(theme_name: str) -> None:
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] > div:first-child > div {{
             background: transparent !important;
         }}
+        [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] input:checked + div {{
+            background: {accent} !important;
+            border-color: {accent} !important;
+        }}
+        [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] input:checked + div > div {{
+            background: #ffffff !important;
+            transform: scale(0.72) !important;
+        }}
+        [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] input:checked ~ div p,
+        [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] input:checked ~ div span {{
+            color: {accent} !important;
+            font-weight: 700 !important;
+        }}
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"][aria-checked="true"] > div:first-child {{
             background: {accent} !important;
             border-color: {accent} !important;
