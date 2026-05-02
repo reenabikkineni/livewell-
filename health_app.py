@@ -207,14 +207,9 @@ def apply_theme(theme_name: str) -> None:
         }}
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] {{
             background: transparent !important;
-            padding: 0.35rem 0.55rem !important;
-            border-radius: 14px !important;
-            border: 1px solid transparent !important;
-            transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease !important;
-        }}
-        [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"]:hover {{
-            background: {accent_soft} !important;
-            border-color: {border} !important;
+            padding: 0.2rem 0 !important;
+            border: none !important;
+            box-shadow: none !important;
         }}
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] > div:first-child {{
             background: #ffffff !important;
@@ -229,35 +224,20 @@ def apply_theme(theme_name: str) -> None:
             border-color: {accent} !important;
         }}
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] input:checked + div > div {{
-            background: #ffffff !important;
-            transform: scale(0.72) !important;
-        }}
-        [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] input:checked ~ div p,
-        [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] input:checked ~ div span {{
-            color: {accent} !important;
-            font-weight: 700 !important;
+            background: {accent} !important;
+            transform: scale(1) !important;
         }}
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"][aria-checked="true"] > div:first-child {{
-            background: {accent} !important;
+            background: #ffffff !important;
             border-color: {accent} !important;
         }}
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"][aria-checked="true"] > div:first-child > div {{
-            background: #ffffff !important;
-            transform: scale(0.72) !important;
-        }}
-        [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"][aria-checked="true"] {{
-            background: #dcecff !important;
-            border-color: {accent} !important;
-            box-shadow: 0 10px 22px rgba(22, 119, 210, 0.18) !important;
+            background: {accent} !important;
+            transform: scale(1) !important;
         }}
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] p,
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] span {{
             color: {text} !important;
-        }}
-        [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"][aria-checked="true"] p,
-        [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"][aria-checked="true"] span {{
-            color: {accent} !important;
-            font-weight: 700 !important;
         }}
         [data-testid="stFormSubmitButton"] button {{
             background: linear-gradient(135deg, #0f6cbd 0%, #1677d2 100%) !important;
