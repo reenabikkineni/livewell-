@@ -211,12 +211,13 @@ def apply_theme(theme_name: str) -> None:
             border: none !important;
             box-shadow: none !important;
         }}
+        [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] > div:first-child {{
+            display: none !important;
+        }}
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] p,
         [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] span {{
             color: {text} !important;
-        }}
-        [data-testid="stSidebar"] input[type="radio"] {{
-            accent-color: {accent} !important;
+            font-weight: 600 !important;
         }}
         [data-testid="stFormSubmitButton"] button {{
             background: linear-gradient(135deg, #0f6cbd 0%, #1677d2 100%) !important;
@@ -2407,6 +2408,11 @@ def choose_demo_patient(patients_df: pd.DataFrame) -> pd.Series:
     return demo_ready_patients.iloc[0]
 
 
+def sidebar_circle_label(option: str, selected_option: str) -> str:
+    marker = "●" if option == selected_option else "○"
+    return f"{marker}  {option}"
+
+
 def generate_patient_help_response(
     user_text: str,
     latest_values: dict,
@@ -2570,7 +2576,17 @@ def prepare_app_state():
 ) = prepare_app_state()
 
 st.sidebar.markdown("## LiveWell+")
-theme_choice = st.sidebar.radio("Background", ["Light", "Dark"], index=0)
+theme_key = "sidebar_theme_choice"
+if theme_key not in st.session_state:
+    st.session_state[theme_key] = "Light"
+theme_options = ["Light", "Dark"]
+theme_choice = st.sidebar.radio(
+    "Background",
+    theme_options,
+    index=theme_options.index(st.session_state[theme_key]),
+    key=theme_key,
+    format_func=lambda option: sidebar_circle_label(option, st.session_state.get(theme_key, "Light")),
+)
 apply_theme(theme_choice)
 
 default_patient_row = choose_demo_patient(patients_df)
@@ -2624,7 +2640,17 @@ elif uploaded_reports_key in st.session_state:
     st.session_state.pop(uploaded_reports_key, None)
     st.session_state.pop(context_cache_key, None)
 
-page = st.sidebar.radio("Navigation", ["Home", "My History", "Health Check", "My Reports"])
+page_key = "sidebar_navigation_page"
+if page_key not in st.session_state:
+    st.session_state[page_key] = "Home"
+page_options = ["Home", "My History", "Health Check", "My Reports"]
+page = st.sidebar.radio(
+    "Navigation",
+    page_options,
+    index=page_options.index(st.session_state[page_key]),
+    key=page_key,
+    format_func=lambda option: sidebar_circle_label(option, st.session_state.get(page_key, "Home")),
+)
 
 empty_conditions = conditions_df.iloc[0:0].copy()
 empty_encounters = encounters_df.iloc[0:0].copy()
