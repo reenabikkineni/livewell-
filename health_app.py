@@ -13,7 +13,7 @@ st.set_page_config(page_title="LiveWell+", page_icon="👤", layout="wide")
 CURRENT_YEAR = 2026
 TARGET_STATE = "California"
 TARGET_PATIENT_COUNT = 10000
-DEFAULT_DEMO_PATIENT_ID = "4f6f3c94-9832-e91e-a5bd-bc482f3b1019"
+DEFAULT_DEMO_PATIENT_ID = "5395e5b4-e7e6-c0c9-4641-21130cb00819"
 CORE_OBSERVATION_REGEX = r"glucose|body mass index|bmi|creatinine|systolic blood pressure"
 MEASUREMENT_SPECS = {
     "Blood sugar": {
