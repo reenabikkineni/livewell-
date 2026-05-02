@@ -202,6 +202,32 @@ def apply_theme(theme_name: str) -> None:
         [data-testid="stNumberInput"] > div {{
             background: transparent !important;
         }}
+        [data-testid="stSidebar"] div[role="radiogroup"] {{
+            gap: 0.35rem !important;
+        }}
+        [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] {{
+            background: transparent !important;
+            padding: 0.15rem 0 !important;
+        }}
+        [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] > div:first-child {{
+            background: #ffffff !important;
+            border: 2px solid {accent} !important;
+            box-shadow: none !important;
+        }}
+        [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] > div:first-child > div {{
+            background: transparent !important;
+        }}
+        [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"][aria-checked="true"] > div:first-child {{
+            background: #ffffff !important;
+            border-color: {accent} !important;
+        }}
+        [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"][aria-checked="true"] > div:first-child > div {{
+            background: {accent} !important;
+        }}
+        [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] p,
+        [data-testid="stSidebar"] div[role="radiogroup"] label[data-baseweb="radio"] span {{
+            color: {text} !important;
+        }}
         [data-testid="stFormSubmitButton"] button {{
             background: linear-gradient(135deg, #0f6cbd 0%, #1677d2 100%) !important;
             border: 1px solid #0f6cbd !important;
@@ -212,6 +238,11 @@ def apply_theme(theme_name: str) -> None:
             font-weight: 800 !important;
             letter-spacing: 0.01em !important;
             box-shadow: 0 12px 24px rgba(15, 108, 189, 0.22) !important;
+        }}
+        [data-testid="stFormSubmitButton"] button,
+        [data-testid="stFormSubmitButton"] button * {{
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
         }}
         [data-testid="stFormSubmitButton"] button:hover {{
             background: linear-gradient(135deg, #0c5ca2 0%, #125fa7 100%) !important;
@@ -249,6 +280,14 @@ def apply_theme(theme_name: str) -> None:
             border-radius: 14px !important;
             font-weight: 700 !important;
             box-shadow: 0 10px 20px rgba(39, 100, 255, 0.18) !important;
+        }}
+        .stButton > button *,
+        .stDownloadButton > button *,
+        [data-testid="stFileUploaderDropzone"] button *,
+        [data-testid="baseButton-secondary"] *,
+        [data-testid="baseButton-secondaryFormSubmit"] * {{
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
         }}
         .stButton > button:hover,
         .stDownloadButton > button:hover,
