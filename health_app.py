@@ -3347,7 +3347,10 @@ def render_health_check():
         )
         asked = st.form_submit_button("Ask Smart Help")
 
-    if asked:
+    current_help_text = st.session_state.get(smart_help_input_key, "")
+    if not str(current_help_text).strip():
+        st.session_state.pop(smart_help_result_key, None)
+    elif asked:
         st.session_state[smart_help_result_key] = generate_patient_help_response(
             user_text,
             latest_values,
